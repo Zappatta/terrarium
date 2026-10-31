@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terrarium Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --loam: #2a1f17;
+    --loam-deep: #1d1510;
+    --bark: #3a2c20;
+    --bark-edge: #4f3d2c;
+    --lichen: #d8dcbc;
+    --lichen-dim: #a3a487;
+    --moss: #7f9b5a;
+    --amber: #e3a948;
+    --rust: #d0694a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--loam-deep); color: var(--lichen); font: 400 14px/1.5 "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif; }
+  body { display: grid; grid-template-columns: minmax(0, 1fr) 330px; height: 100vh; overflow: hidden;
+    background: radial-gradient(ellipse at 40% 30%, #33271c 0%, var(--loam-deep) 70%); }
+  main { position: relative; display: flex; align-items: center; justify-content: center; padding: 20px; min-width: 0; min-height: 0; overflow: hidden; }
+
+  .tank { position: relative; border-radius: 22px; padding: 10px; background: linear-gradient(160deg, #5a4733, #2b2016 60%, #3d2f22);
+    box-shadow: 0 30px 80px #0009, inset 0 1px 0 #ffffff1a; }
+  .tank canvas { display: block; border-radius: 14px; cursor: grab; touch-action: none; }
+  .tank canvas.dragging { cursor: grabbing; }
+  #zoomHint { position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%); pointer-events: none; color: var(--lichen-dim);
+    background: #1d1510cc; padding: 4px 12px; border-radius: 999px; font-size: 12.5px; }
+  .tank::after { content: ""; position: absolute; inset: 10px; border-radius: 14px; pointer-events: none;
+    background: linear-gradient(115deg, #ffffff12 0%, #ffffff05 22%, transparent 23%, transparent 70%, #ffffff08 71%, transparent 80%);
+    box-shadow: inset 0 0 0 1px #ffffff14, inset 0 0 60px #0007; }
+
+  #hud { position: absolute; top: 34px; left: 34px; pointer-events: none; font-variant-numeric: tabular-nums;
+    background: #1d1510cc; padding: 8px 12px; border-radius: 10px; color: var(--lichen-dim); backdrop-filter: blur(4px); }
+  #hud:empty { display: none; }
+  #hud b { color: var(--lichen); font-weight: 800; font-size: 18px; letter-spacing: -.01em; }
+  #tooltip { position: fixed; pointer-events: none; background: #1d1510ee; border: 1px solid var(--bark-edge); border-radius: 10px;
+    padding: 8px 10px; font-size: 13px; display: none; white-space: nowrap; box-shadow: 0 8px 24px #0008; }
+  #tooltip b { color: var(--lichen); }
+  #tooltip span { color: var(--lichen-dim); }
+
+  aside { background: var(--loam); border-left: 1px solid #ffffff0d; overflow-y: auto; padding: 22px 20px; display: flex; flex-direction: column; gap: 22px; }
+  h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -.035em; line-height: 1; color: var(--lichen); }
+  h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: var(--lichen); letter-spacing: -.01em; }
+  h2 .meta { font-weight: 400; }
+  .meta { color: var(--lichen-dim); font-size: 12.5px; }
+
+  button, select { background: var(--bark); color: var(--lichen); border: 1px solid var(--bark-edge); border-radius: 999px; padding: 6px 14px;
+    font: 600 13px "Bricolage Grotesque", sans-serif; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--amber); }
+  button:focus-visible, select:focus-visible, .item:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  button.primary { background: var(--amber); color: #2a1a0a; border-color: var(--amber); }
+  button.primary:hover { background: #f0b95a; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .list { display: flex; flex-direction: column; gap: 2px; max-height: 210px; overflow-y: auto; margin: 0 -8px; }
+  .item { padding: 7px 8px; border-radius: 10px; cursor: pointer; border-left: 3px solid transparent; }
+  .item:hover { background: #ffffff08; }
+  .item.active { background: #ffffff0d; border-left-color: var(--amber); }
+  .item b { font-weight: 600; }
+  .item small { color: var(--lichen-dim); display: block; font-size: 12px; }
+
+  .legend { display: flex; flex-direction: column; gap: 10px; }
+  .sp { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; }
+  .sp canvas { width: 44px; height: 44px; background: #1d1510; border-radius: 12px; }
+  .sp .name { font-weight: 600; }
+  .sp .num { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 18px; }
+  .sp .bar { grid-column: 2 / 4; height: 3px; background: #ffffff0d; border-radius: 2px; overflow: hidden; margin-top: -4px; }
+  .sp .bar > div { height: 100%; transition: width .4s; }
+  .traits { color: var(--lichen-dim); font-size: 11.5px; }
+
+  input[type=range] { width: 100%; accent-color: var(--amber); }
+  canvas#chart { width: 100%; height: 110px; display: block; }
+  .error { color: var(--rust); font-size: 13px; }
+  .notices { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+  .notices:empty { display: none; }
+  .scores { margin-top: 10px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; }
+  .scores b { font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; overflow: auto; }
+    aside { border-left: 0; border-top: 1px solid #ffffff0d; }
+  }
+  @media (prefers-reduced-motion: reduce) { .sp .bar > div { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="tank"><canvas id="world" width="800" height="800"></canvas></div>
+  <div id="hud"></div>
+  <div id="zoomHint">Scroll to zoom, drag to move, double-click to reset</div>
+  <div id="tooltip"></div>
+</main>
+<aside>
+  <h1>Terrarium</h1>
+
+  <div>
+    <h2>Live worlds</h2>
+    <div class="list" id="worlds"></div>
+    <div class="row" style="margin-top:10px"><button class="primary" id="newWorld">Start a world with the example species</button></div>
+  </div>
+
+  <div id="controls"></div>
+
+  <div>
+    <h2>Species</h2>
+    <div class="legend" id="legend"><div class="meta">Pick a world or a replay to see who lives there.</div></div>
+  </div>
+
+  <div>
+    <h2>Population over time</h2>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div>
+    <h2>Replays</h2>
+    <div class="list" id="replays"></div>
+  </div>
+
+  <div class="error" id="error" role="alert"></div>
+  <div class="meta" id="engine"></div>
+</aside>
+
+<script>
+const PALETTE = ["#e8b04a", "#6fc3d6", "#e0709a", "#b9d86b", "#ad94e6", "#f08a4b", "#62d3b2", "#ece6c8", "#8fb4ff", "#ff7a6b"];
+const KIND = { PLANT: 0, ANIMAL: 1, CORPSE: 2 };
+const params = new URLSearchParams(location.search);
+const token = params.get("token");
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("world"), ctx = canvas.getContext("2d");
+const chart = $("chart"), cctx = chart.getContext("2d");
+
+const api = async (path, opts = {}) => {
+  const headers = { ...(opts.body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) };
+  const r = await fetch(path, { ...opts, headers });
+  const body = r.status === 204 ? null : await r.json();
+  if (!r.ok) throw new Error(body?.error ?? r.statusText);
+  return body;
+};
+const showError = (e) => { $("error").textContent = e ? String(e.message ?? e) : ""; };
+const escape = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+// ---------- small utilities ----------
+
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const hashStr = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.max(0, Math.min(255, Math.round(amt < 0 ? v * (1 + amt) : v + (255 - v) * amt)));
+  return `rgb(${f(n >> 16)}, ${f((n >> 8) & 255)}, ${f(n & 255)})`;
+}
+function mix(hex, other, t) {
+  const a = parseInt(hex.slice(1), 16), b = parseInt(other.slice(1), 16);
+  const ch = (s) => Math.round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t);
+  return `#${[16, 8, 0].map((s) => ch(s).toString(16).padStart(2, "0")).join("")}`;
+}
+
+// ---------- state ----------
+
+const state = {
+  mode: null,
+  worldSize: { w: 800, h: 800 },
+  species: new Map(),   // slot -> {name, diet, color, codeHash, traits, look}
+  prev: new Map(), curr: new Map(), frameAt: 0, interval: 100, tick: 0,
+  walk: new Map(),      // id -> {phase, born}
+  history: [], stats: null, ws: null, replay: null, hover: null,
+  ground: null, groundKey: "",
+  view: { z: 1, x: 0, y: 0 },   // zoom and the world coordinate at the canvas' top-left
+};
+const traitCache = new Map();
+
+async function setSpecies(list) {
+  for (const s of list) {
+    const existing = state.species.get(s.slot);
+    const entry = { ...existing, ...s, color: existing?.color ?? PALETTE[state.species.size % PALETTE.length] };
+    state.species.set(s.slot, entry);
+    if (!entry.traits && s.codeHash) {
+      if (!traitCache.has(s.codeHash)) traitCache.set(s.codeHash, api(`/creatures/${s.codeHash}`).then((c) => c.traits).catch(() => ({})));
+      traitCache.get(s.codeHash).then((traits) => { entry.traits = traits; entry.look = lookFor(entry); renderLegend(); });
+    }
+    entry.look = lookFor(entry);
+  }
+  renderLegend();
+}
+
+/** Turn a species' trait build into drawing parameters, so a creature's body reads as its build. */
+function lookFor(sp) {
+  const t = sp.traits ?? {};
+  const v = (k, d = 3) => (t[k] ?? d) / 10;
+  const r = rng(hashStr(sp.codeHash ?? sp.slot));
+  const carn = sp.diet === "carnivore";
+  return {
+    carn,
+    legPairs: carn ? 3 : v("speed") >= 0.6 ? 4 : 3,
+    legLen: 0.75 + v("speed") * 0.7,
+    jaw: v("attack", 0),
+    plates: Math.round(v("defense", 0) * 6),
+    camo: v("camouflage", 0),
+    eye: 0.09 + v("sight") * 0.07,
+    eyes4: v("sight") >= 0.7,
+    stripe: r() < 0.5,
+    spots: Array.from({ length: 7 }, () => [r() * 1.6 - 1, r() * 1.2 - 0.6, 0.12 + r() * 0.2, r() < 0.5]),
+    body: sp.color,
+    dark: shade(sp.color, -0.45),
+    light: shade(sp.color, 0.35),
+  };
+}
+
+// ---------- creature drawing ----------
+
+function drawCreature(g, x, y, r, angle, look, phase, alpha = 1) {
+  g.save();
+  g.translate(x, y);
+  g.rotate(angle);
+  g.globalAlpha = alpha * (1 - look.camo * 0.45);
+
+  const sh = g.createRadialGradient(r * 0.15, r * 0.25, r * 0.2, r * 0.15, r * 0.25, r * 1.5);
+  sh.addColorStop(0, "rgba(10, 6, 2, 0.45)"); sh.addColorStop(1, "rgba(10, 6, 2, 0)");
+  g.fillStyle = sh;
+  g.beginPath(); g.ellipse(r * 0.15, r * 0.25, r * 1.6, r * 1.2, 0, 0, Math.PI * 2); g.fill();
+
+  // Legs: two-segment, alternating gait.
+  g.strokeStyle = look.dark;
+  g.lineCap = "round";
+  g.lineJoin = "round";
+  const pairs = look.legPairs;
+  for (let i = 0; i < pairs; i++) {
+    const bx = r * (0.55 - (i / (pairs - 1 || 1)) * 1.1);
+    for (const side of [-1, 1]) {
+      const swing = Math.sin(phase + i * Math.PI * 0.8 + (side > 0 ? Math.PI : 0)) * 0.45;
+      const len = r * look.legLen;
+      const a1 = side * (Math.PI / 2 - 0.25 + (i - (pairs - 1) / 2) * -0.35) + swing * side * 0.6;
+      const kx = bx + Math.cos(a1) * len * 0.55, ky = Math.sin(a1) * len * 0.55;
+      const a2 = a1 + side * -0.7 + swing * 0.4;
+      g.lineWidth = Math.max(1, r * 0.13);
+      g.beginPath(); g.moveTo(bx, side * r * 0.35); g.lineTo(kx, ky); g.lineTo(kx + Math.cos(a2) * len * 0.5, ky + Math.sin(a2) * len * 0.5); g.stroke();
+    }
+  }
+
+  const grad = (cx, cy, rr) => {
+    const gr = g.createRadialGradient(cx - rr * 0.35, cy - rr * 0.45, rr * 0.1, cx, cy, rr * 1.15);
+    gr.addColorStop(0, look.light); gr.addColorStop(0.55, look.body); gr.addColorStop(1, look.dark);
+    return gr;
+  };
+
+  if (look.carn) {
+    // Tapered abdomen with a tail point.
+    g.fillStyle = grad(-r * 0.35, 0, r);
+    g.beginPath();
+    g.moveTo(-r * 1.55, 0);
+    g.bezierCurveTo(-r * 1.2, -r * 0.75, r * 0.1, -r * 0.7, r * 0.25, 0);
+    g.bezierCurveTo(r * 0.1, r * 0.7, -r * 1.2, r * 0.75, -r * 1.55, 0);
+    g.fill();
+  } else {
+    g.fillStyle = grad(-r * 0.25, 0, r);
+    g.beginPath(); g.ellipse(-r * 0.25, 0, r * 1.0, r * 0.82, 0, 0, Math.PI * 2); g.fill();
+  }
+
+  // Camouflage mottling and markings, clipped to the abdomen.
+  g.save();
+  g.beginPath();
+  if (look.carn) g.ellipse(-r * 0.6, 0, r * 0.95, r * 0.62, 0, 0, Math.PI * 2);
+  else g.ellipse(-r * 0.25, 0, r * 1.0, r * 0.82, 0, 0, Math.PI * 2);
+  g.clip();
+  if (look.camo > 0) {
+    for (const [sx, sy, sr, darkSpot] of look.spots) {
+      g.fillStyle = darkSpot ? `rgba(30, 40, 20, ${0.25 + look.camo * 0.4})` : `rgba(140, 160, 90, ${0.15 + look.camo * 0.35})`;
+      g.beginPath(); g.arc(-r * 0.3 + sx * r, sy * r, sr * r * (1 + look.camo), 0, Math.PI * 2); g.fill();
+    }
+  }
+  if (look.stripe && !look.carn) {
+    g.strokeStyle = look.dark; g.globalAlpha *= 0.5; g.lineWidth = r * 0.12;
+    g.beginPath(); g.moveTo(-r * 1.2, 0); g.lineTo(r * 0.6, 0); g.stroke();
+    g.globalAlpha /= 0.5;
+  }
+  // Armour plates.
+  if (look.plates > 0) {
+    g.strokeStyle = look.dark; g.lineWidth = Math.max(1, r * 0.08);
+    for (let i = 0; i < look.plates; i++) {
+      const px = r * (0.35 - (i + 1) * (1.4 / (look.plates + 1)));
+      g.beginPath(); g.arc(px + r * 0.9, 0, r * 0.95, Math.PI * 0.82, Math.PI * 1.18); g.stroke();
+    }
+    g.strokeStyle = "rgba(255, 255, 240, 0.25)"; g.lineWidth = r * 0.1;
+    g.beginPath(); g.arc(-r * 0.25, 0, r * 0.82, Math.PI * 1.15, Math.PI * 1.6); g.stroke();
+  }
+  g.restore();
+
+  // Thorax and head.
+  g.fillStyle = grad(r * 0.5, 0, r * 0.45);
+  g.beginPath(); g.ellipse(r * 0.55, 0, r * 0.38, r * 0.42, 0, 0, Math.PI * 2); g.fill();
+  const hx = look.carn ? r * 1.05 : r * 0.98;
+  g.fillStyle = grad(hx, 0, r * 0.4);
+  g.beginPath();
+  if (look.carn) { g.moveTo(hx + r * 0.42, 0); g.quadraticCurveTo(hx, -r * 0.48, hx - r * 0.3, -r * 0.3); g.lineTo(hx - r * 0.3, r * 0.3); g.quadraticCurveTo(hx, r * 0.48, hx + r * 0.42, 0); }
+  else g.arc(hx, 0, r * 0.36, 0, Math.PI * 2);
+  g.fill();
+
+  // Mandibles for anything with attack points.
+  if (look.jaw > 0) {
+    const jl = r * (0.25 + look.jaw * 0.6);
+    const bite = Math.sin(phase * 0.5) * 0.15;
+    g.strokeStyle = shade(look.body, -0.6); g.lineWidth = Math.max(1, r * (0.08 + look.jaw * 0.08));
+    for (const side of [-1, 1]) {
+      g.beginPath();
+      g.moveTo(hx + r * 0.25, side * r * 0.18);
+      g.quadraticCurveTo(hx + r * 0.25 + jl, side * (r * 0.35 + bite * r), hx + r * 0.25 + jl * 0.9, -side * r * 0.05);
+      g.stroke();
+    }
+  }
+  // Antennae for grazers.
+  if (!look.carn) {
+    g.strokeStyle = look.dark; g.lineWidth = Math.max(0.8, r * 0.06);
+    for (const side of [-1, 1]) {
+      g.beginPath(); g.moveTo(hx + r * 0.2, side * r * 0.15);
+      g.quadraticCurveTo(hx + r * 0.7, side * r * 0.25, hx + r * 0.95, side * (r * 0.55 + Math.sin(phase) * r * 0.06)); g.stroke();
+    }
+  }
+  // Eyes scale with sight.
+  const er = r * look.eye;
+  const eyesAt = look.eyes4 ? [[0.12, 0.2, 1], [-0.05, 0.3, 0.7]] : [[0.1, 0.2, 1]];
+  for (const [ex, ey, s] of eyesAt) {
+    for (const side of [-1, 1]) {
+      g.fillStyle = "#f4f1e0";
+      g.beginPath(); g.arc(hx + ex * r, side * ey * r, er * s, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#120c06";
+      g.beginPath(); g.arc(hx + ex * r + er * s * 0.3, side * ey * r, er * s * 0.6, 0, Math.PI * 2); g.fill();
+    }
+  }
+  g.restore();
+}
+
+// ---------- plants & corpses ----------
+
+const plantCache = new Map();
+function plantSprite(id, r, energy, scale) {
+  const stage = Math.max(1, Math.min(8, Math.round((energy / 60) * 8)));
+  const flower = energy >= 50;
+  const q = Math.pow(2, Math.round(Math.log2(scale) * 4) / 4);
+  const key = `${stage}|${flower}|${q}`;
+  scale = q;
+  const cached = plantCache.get(id);
+  if (cached?.key === key) return cached.canvas;
+
+  const rand = rng(id * 2654435761);
+  const variant = Math.floor(rand() * 3);
+  const px = Math.ceil(r * scale * 5);
+  const c = cached?.canvas ?? document.createElement("canvas");
+  c.width = c.height = px;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, px, px);
+  g.translate(px / 2, px / 2);
+  const R = r * scale * (0.9 + stage * 0.17);
+  const base = ["#6f9c4a", "#5c8f5e", "#86a35a"][variant];
+  const leaves = variant === 1 ? 3 + Math.ceil(stage / 2) : 2 + stage;
+  const rot0 = rand() * Math.PI * 2;
+
+  g.fillStyle = "rgba(10, 6, 2, 0.3)";
+  g.beginPath(); g.arc(R * 0.12, R * 0.15, R * 0.75, 0, Math.PI * 2); g.fill();
+
+  for (let i = 0; i < leaves; i++) {
+    const a = rot0 + (i / leaves) * Math.PI * 2 + (rand() - 0.5) * 0.4;
+    const len = R * (0.75 + rand() * 0.35);
+    g.save(); g.rotate(a);
+    const lg = g.createLinearGradient(0, 0, len, 0);
+    lg.addColorStop(0, shade(base, -0.35)); lg.addColorStop(0.6, base); lg.addColorStop(1, shade(base, 0.25));
+    g.fillStyle = lg;
+    if (variant === 0) {
+      // Clover: three rounded lobes per leaf.
+      for (const off of [-0.32, 0, 0.32]) {
+        g.save(); g.rotate(off);
+        g.beginPath(); g.ellipse(len * 0.62, 0, len * 0.36, len * 0.27, 0, 0, Math.PI * 2); g.fill();
+        g.restore();
+      }
+    } else if (variant === 1) {
+      // Fern: a midrib with paired leaflets.
+      g.strokeStyle = shade(base, -0.3); g.lineWidth = Math.max(1, R * 0.06);
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(len * 1.1, 0); g.stroke();
+      for (let k = 1; k <= 5; k++) {
+        const t = k / 6, w = len * 0.3 * (1 - t * 0.6);
+        for (const s of [-1, 1]) { g.beginPath(); g.ellipse(len * 1.1 * t, s * w * 0.55, w * 0.55, w * 0.22, s * 0.6, 0, Math.PI * 2); g.fill(); }
+      }
+    } else {
+      // Succulent: thick pointed leaf with a pale edge.
+      g.beginPath(); g.moveTo(0, -len * 0.18); g.quadraticCurveTo(len * 0.7, -len * 0.28, len, 0); g.quadraticCurveTo(len * 0.7, len * 0.28, 0, len * 0.18); g.closePath(); g.fill();
+      g.strokeStyle = "rgba(220, 235, 190, 0.35)"; g.lineWidth = Math.max(0.6, R * 0.04); g.stroke();
+    }
+    if (variant !== 1) {
+      g.strokeStyle = "rgba(230, 245, 200, 0.25)"; g.lineWidth = Math.max(0.6, R * 0.035);
+      g.beginPath(); g.moveTo(len * 0.1, 0); g.lineTo(len * 0.85, 0); g.stroke();
+    }
+    g.restore();
+  }
+  if (flower) {
+    const fc = ["#f6f2e4", "#f2d16b", "#c9a4e8"][Math.floor(rand() * 3)];
+    const petals = 5, pr = R * 0.22;
+    for (let i = 0; i < petals; i++) {
+      const a = (i / petals) * Math.PI * 2;
+      g.fillStyle = fc;
+      g.beginPath(); g.ellipse(Math.cos(a) * pr, Math.sin(a) * pr, pr * 0.75, pr * 0.45, a, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = "#e0a93a"; g.beginPath(); g.arc(0, 0, pr * 0.5, 0, Math.PI * 2); g.fill();
+  } else {
+    g.fillStyle = shade(base, -0.45); g.beginPath(); g.arc(0, 0, R * 0.14, 0, Math.PI * 2); g.fill();
+  }
+  plantCache.set(id, { key, canvas: c });
+  return c;
+}
+
+/** A plant belonging to a programmable species: its look follows its traits and species colour. */
+const speciesPlantCache = new Map();
+function speciesPlantSprite(id, r, energy, scale, sp) {
+  const t = sp.traits ?? {};
+  const max = 20 + 25 * (t.size ?? 2);
+  const stage = Math.max(1, Math.min(6, Math.round((energy / max) * 6)));
+  const q = Math.pow(2, Math.round(Math.log2(scale) * 4) / 4);
+  const key = `${sp.slot}|${stage}|${q}|${sp.traits ? 1 : 0}`;
+  const cached = speciesPlantCache.get(id);
+  if (cached?.key === key) return cached.canvas;
+
+  const rand = rng(id * 2654435761);
+  const thorns = (t.thorns ?? 0) / 10, toxin = (t.toxin ?? 0) / 10, tough = (t.toughness ?? 0) / 10;
+  const px = Math.ceil(r * q * 6);
+  const c = cached?.canvas ?? document.createElement("canvas");
+  c.width = c.height = px;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, px, px);
+  g.translate(px / 2, px / 2);
+  const R = r * q * (1 + stage * 0.16);
+  const leafColor = mix(sp.color, "#5f8f45", 0.45);
+  const leaves = 4 + stage;
+  const rot0 = rand() * Math.PI * 2;
+
+  const sh = g.createRadialGradient(R * 0.1, R * 0.15, 0, R * 0.1, R * 0.15, R * 1.1);
+  sh.addColorStop(0, "rgba(10, 6, 2, 0.4)"); sh.addColorStop(1, "rgba(10, 6, 2, 0)");
+  g.fillStyle = sh; g.beginPath(); g.arc(R * 0.1, R * 0.15, R * 1.1, 0, Math.PI * 2); g.fill();
+
+  for (let i = 0; i < leaves; i++) {
+    const a = rot0 + (i / leaves) * Math.PI * 2 + (rand() - 0.5) * 0.3;
+    const len = R * (0.8 + rand() * 0.3);
+    const w = len * (0.22 + tough * 0.14 + (thorns > 0.3 ? -0.06 : 0.04));
+    g.save(); g.rotate(a);
+    const lg = g.createLinearGradient(0, 0, len, 0);
+    lg.addColorStop(0, shade(leafColor, -0.4)); lg.addColorStop(0.55, leafColor); lg.addColorStop(1, shade(leafColor, 0.2));
+    g.fillStyle = lg;
+    g.beginPath();
+    if (thorns > 0.3) {
+      // Serrated, thistle-like leaf.
+      g.moveTo(0, 0);
+      const teeth = 4;
+      for (let k = 1; k <= teeth; k++) g.lineTo((len * (k - 0.5)) / teeth, -w * (k % 2 ? 1.1 : 0.5));
+      g.lineTo(len, 0);
+      for (let k = teeth; k >= 1; k--) g.lineTo((len * (k - 0.5)) / teeth, w * (k % 2 ? 1.1 : 0.5));
+      g.closePath();
+    } else {
+      g.moveTo(0, 0); g.quadraticCurveTo(len * 0.45, -w * 1.6, len, 0); g.quadraticCurveTo(len * 0.45, w * 1.6, 0, 0);
+    }
+    g.fill();
+    if (tough > 0) {
+      g.strokeStyle = `rgba(230, 240, 210, ${0.15 + tough * 0.35})`; g.lineWidth = Math.max(0.8, R * 0.04 * (1 + tough * 2)); g.stroke();
+    }
+    g.strokeStyle = "rgba(235, 245, 215, 0.3)"; g.lineWidth = Math.max(0.6, R * 0.03);
+    g.beginPath(); g.moveTo(len * 0.08, 0); g.lineTo(len * 0.9, 0); g.stroke();
+    if (thorns > 0) {
+      g.strokeStyle = "#f1e4c4"; g.lineWidth = Math.max(0.7, R * 0.035); g.lineCap = "round";
+      const spines = Math.round(2 + thorns * 5);
+      for (let k = 0; k < spines; k++) {
+        const sx = len * (0.2 + (0.75 * k) / spines), side = k % 2 ? 1 : -1;
+        g.beginPath(); g.moveTo(sx, side * w * 0.6); g.lineTo(sx + len * 0.06, side * (w * 0.6 + R * 0.22 * thorns)); g.stroke();
+      }
+    }
+    if (toxin > 0) {
+      g.fillStyle = `rgba(60, 10, 50, ${0.25 + toxin * 0.4})`;
+      for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(len * (0.3 + rand() * 0.5), (rand() - 0.5) * w, R * 0.05, 0, Math.PI * 2); g.fill(); }
+    }
+    g.restore();
+  }
+  // Centre: warning berries for toxic species, a seed head otherwise.
+  if (toxin > 0.2 && stage >= 3) {
+    const berries = 3 + Math.round(toxin * 4);
+    for (let k = 0; k < berries; k++) {
+      const a = (k / berries) * Math.PI * 2 + rot0, d = R * 0.18;
+      const bx = Math.cos(a) * d, by = Math.sin(a) * d, br = R * 0.11;
+      const bg = g.createRadialGradient(bx - br * 0.3, by - br * 0.3, br * 0.1, bx, by, br);
+      bg.addColorStop(0, shade(sp.color, 0.5)); bg.addColorStop(1, shade(sp.color, -0.3));
+      g.fillStyle = bg; g.beginPath(); g.arc(bx, by, br, 0, Math.PI * 2); g.fill();
+    }
+  } else {
+    g.fillStyle = shade(sp.color, stage >= 4 ? 0.1 : -0.3);
+    g.beginPath(); g.arc(0, 0, R * 0.16, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "rgba(255, 250, 230, 0.5)";
+    g.beginPath(); g.arc(-R * 0.04, -R * 0.05, R * 0.06, 0, Math.PI * 2); g.fill();
+  }
+  speciesPlantCache.set(id, { key, canvas: c });
+  return c;
+}
+
+function drawCorpse(g, x, y, r, energy, id) {
+  const size = Math.max(1, r - 3);
+  const fresh = Math.max(0.15, Math.min(1, energy / (25 * size)));
+  const rand = rng(id * 7919);
+  g.save();
+  g.translate(x, y);
+  g.rotate(rand() * Math.PI * 2);
+  // A dark stain that dries out, with a few scattered bones.
+  g.globalAlpha = 0.25 + fresh * 0.5;
+  g.fillStyle = mix("#5a1f14", "#2e2218", 1 - fresh);
+  g.beginPath();
+  for (let i = 0; i <= 10; i++) {
+    const a = (i / 10) * Math.PI * 2, rr = r * (1.1 + rand() * 0.5);
+    i ? g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr * 0.8) : g.moveTo(Math.cos(a) * rr, Math.sin(a) * rr * 0.8);
+  }
+  g.closePath(); g.fill();
+  g.globalAlpha = 0.5 + fresh * 0.5;
+  g.strokeStyle = "#e9e0c8"; g.lineCap = "round"; g.lineWidth = Math.max(1, r * 0.13);
+  for (let i = 0; i < 4; i++) {
+    const a = rand() * Math.PI * 2, d = rand() * r * 0.6, l = r * (0.3 + rand() * 0.35);
+    const cx = Math.cos(a) * d, cy = Math.sin(a) * d, ba = rand() * Math.PI;
+    g.beginPath(); g.moveTo(cx - Math.cos(ba) * l, cy - Math.sin(ba) * l); g.lineTo(cx + Math.cos(ba) * l, cy + Math.sin(ba) * l); g.stroke();
+  }
+  g.fillStyle = "#e9e0c8";
+  g.beginPath(); g.ellipse(r * 0.5, -r * 0.2, r * 0.3, r * 0.24, 0.3, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#2e2218";
+  g.beginPath(); g.arc(r * 0.58, -r * 0.24, r * 0.07, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+
+// ---------- ground ----------
+
+function buildGround(W, H, sx, sy) {
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  const rand = rng(hashStr(`${state.worldSize.w}x${state.worldSize.h}`));
+  const base = g.createRadialGradient(W * 0.45, H * 0.4, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+  base.addColorStop(0, "#4a3726"); base.addColorStop(1, "#2a1e14");
+  g.fillStyle = base; g.fillRect(0, 0, W, H);
+  const s = (sx + sy) / 2;
+
+  // Damp darker patches and moss.
+  for (let i = 0; i < 26; i++) {
+    const x = rand() * W, y = rand() * H, r = (40 + rand() * 110) * s;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    const moss = rand() < 0.45;
+    gr.addColorStop(0, moss ? "rgba(96, 120, 60, 0.32)" : "rgba(20, 12, 6, 0.35)");
+    gr.addColorStop(1, "rgba(0, 0, 0, 0)");
+    g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // Soil grain.
+  for (let i = 0; i < W * H * 0.004; i++) {
+    const v = rand();
+    g.fillStyle = v < 0.5 ? `rgba(15, 9, 4, ${0.2 + rand() * 0.3})` : `rgba(160, 130, 95, ${0.06 + rand() * 0.12})`;
+    g.beginPath(); g.arc(rand() * W, rand() * H, (0.4 + rand() * 0.8) * s, 0, Math.PI * 2); g.fill();
+  }
+  // Leaf litter.
+  for (let i = 0; i < 70; i++) {
+    const x = rand() * W, y = rand() * H, l = (4 + rand() * 7) * s;
+    g.save(); g.translate(x, y); g.rotate(rand() * Math.PI * 2);
+    g.fillStyle = ["#6b4a2a", "#7d5a33", "#57401f", "#8a6a3a"][Math.floor(rand() * 4)];
+    g.globalAlpha = 0.45 + rand() * 0.3;
+    g.beginPath(); g.ellipse(0, 0, l, l * 0.42, 0, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = "rgba(30, 18, 8, 0.5)"; g.lineWidth = Math.max(0.5, s * 0.6);
+    g.beginPath(); g.moveTo(-l, 0); g.lineTo(l, 0); g.stroke();
+    g.restore();
+  }
+  // Pebbles.
+  for (let i = 0; i < 55; i++) {
+    const x = rand() * W, y = rand() * H, r = (2 + rand() * 5) * s;
+    g.fillStyle = "rgba(0, 0, 0, 0.3)";
+    g.beginPath(); g.ellipse(x + r * 0.25, y + r * 0.3, r, r * 0.75, 0, 0, Math.PI * 2); g.fill();
+    const tone = 95 + rand() * 60;
+    const pg = g.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r);
+    pg.addColorStop(0, `rgb(${tone + 50}, ${tone + 45}, ${tone + 35})`);
+    pg.addColorStop(1, `rgb(${tone - 30}, ${tone - 35}, ${tone - 40})`);
+    g.fillStyle = pg;
+    g.beginPath(); g.ellipse(x, y, r, r * 0.75, rand() * Math.PI, 0, Math.PI * 2); g.fill();
+  }
+  // Edge shade, as if looking down into a tank.
+  const v = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  v.addColorStop(0, "rgba(0, 0, 0, 0)"); v.addColorStop(1, "rgba(0, 0, 0, 0.45)");
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+  return c;
+}
+
+// ---------- rendering ----------
+
+function fitCanvas() {
+  const main = canvas.closest("main").getBoundingClientRect();
+  const maxH = window.innerWidth <= 860 ? window.innerWidth : window.innerHeight;
+  const size = Math.max(200, Math.min(main.width - 60, maxH - 60));
+  const ratio = state.worldSize.h / state.worldSize.w;
+  const cssW = ratio > 1 ? size / ratio : size, cssH = ratio > 1 ? size : size * ratio;
+  canvas.style.width = cssW + "px";
+  canvas.style.height = cssH + "px";
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  plantCache.clear();
+}
+addEventListener("resize", fitCanvas);
+
+function applyFrame(frame, interval) {
+  state.prev = state.curr;
+  state.curr = new Map(frame.e.map((e) => [e[0], e]));
+  state.frameAt = performance.now();
+  state.interval = interval;
+  state.tick = frame.tick;
+  for (const id of state.walk.keys()) if (!state.curr.has(id)) state.walk.delete(id);
+  for (const id of plantCache.keys()) if (!state.curr.has(id)) plantCache.delete(id);
+  for (const id of speciesPlantCache.keys()) if (!state.curr.has(id)) speciesPlantCache.delete(id);
+}
+
+function draw() {
+  requestAnimationFrame(draw);
+  const W = canvas.width, H = canvas.height;
+  const v = state.view;
+  const bx = W / state.worldSize.w, by = H / state.worldSize.h;
+  const key = `${W}x${H}x${state.worldSize.w}x${state.worldSize.h}`;
+  if (state.groundKey !== key) {
+    // Built at up to 2x so zooming in stays crisp.
+    const k = Math.min(2, 4096 / Math.max(W, H));
+    state.ground = buildGround(Math.round(W * k), Math.round(H * k), bx * k, by * k);
+    state.groundKey = key;
+  }
+  const sx = bx * v.z, sy = by * v.z, scale = (sx + sy) / 2;
+  const ox = v.x * sx, oy = v.y * sy;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#2a1e14"; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(state.ground, -ox, -oy, W * v.z, H * v.z);
+  const margin = 40 * scale;
+  const visible = (x, y) => x > -margin && y > -margin && x < W + margin && y < H + margin;
+
+  if (state.replay?.playing) advanceReplay();
+  const now = performance.now();
+  const t = Math.min(1, (now - state.frameAt) / state.interval);
+  const corpses = [], plants = [], animals = [];
+
+  for (const e of state.curr.values()) {
+    const p = state.prev.get(e[0]);
+    const x = (p ? p[2] + (e[2] - p[2]) * t : e[2]) * sx - ox;
+    const y = (p ? p[3] + (e[3] - p[3]) * t : e[3]) * sy - oy;
+    if (e[1] !== KIND.ANIMAL && !visible(x, y)) continue;
+    if (e[1] === KIND.PLANT) plants.push([e, x, y]);
+    else if (e[1] === KIND.CORPSE) corpses.push([e, x, y]);
+    else animals.push([e, p, x, y]);
+  }
+
+  for (const [e, x, y] of corpses) drawCorpse(ctx, x, y, e[4] * scale, e[6], e[0]);
+  for (const [e, x, y] of plants) {
+    const sp = e[5] ? state.species.get(e[5]) : null;
+    const sprite = sp ? speciesPlantSprite(e[0], e[4], e[6], scale, sp) : plantSprite(e[0], e[4], e[6], scale);
+    ctx.drawImage(sprite, x - sprite.width / 2, y - sprite.height / 2);
+  }
+  for (const [e, p, x, y] of animals) {
+    const sp = state.species.get(e[5]);
+    if (!sp) continue;
+    sp.look ??= lookFor(sp);
+    let w = state.walk.get(e[0]);
+    if (!w) state.walk.set(e[0], (w = { phase: (e[0] * 1.7) % 6.28, angle: 0, born: p ? 0 : now, lastX: x + ox, lastY: y + oy }));
+    const wx = x + ox, wy = y + oy;
+    const dx = (wx - w.lastX) / scale, dy = (wy - w.lastY) / scale, moved = Math.hypot(dx, dy);
+    if (moved > 0.01) {
+      const target = Math.atan2(dy, dx);
+      let d = target - w.angle;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      w.angle += d * 0.25;
+      if (!reduceMotion) w.phase += (moved / e[4]) * 1.6;
+    }
+    w.lastX = wx; w.lastY = wy;
+    if (!visible(x, y)) continue;
+    const grow = w.born ? Math.min(1, (now - w.born) / 450) : 1;
+    const r = e[4] * scale * (0.4 + 0.6 * grow);
+    drawCreature(ctx, x, y, r, w.angle, sp.look, w.phase);
+    if (state.hover === e[0]) {
+      ctx.strokeStyle = "#f4ead0"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.arc(x, y, r * 2, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+
+  const paused = state.mode === "live" ? state.stats?.paused : !state.replay?.playing;
+  if (state.mode === "replay" && !state.replay) $("hud").innerHTML = "<b>Loading replay…</b>";
+  else {
+    let nAnimals = 0, nPlants = 0;
+    for (const e of state.curr.values()) { if (e[1] === KIND.ANIMAL) nAnimals++; else if (e[1] === KIND.PLANT) nPlants++; }
+    $("hud").innerHTML = state.mode ? `<b>Tick ${state.tick}</b>${paused ? " (paused)" : ""}<br>${nAnimals} animals, ${nPlants} plants${v.z > 1.01 ? `<br>Zoom ${v.z.toFixed(1)}×` : ""}` : "";
+  }
+}
+
+function portrait(sp) {
+  const c = document.createElement("canvas");
+  const dpr = window.devicePixelRatio || 1;
+  c.width = c.height = 44 * dpr;
+  const g = c.getContext("2d");
+  if (sp.diet === "plant") {
+    const size = sp.traits?.size ?? 2;
+    const sprite = speciesPlantSprite(-hashStr(sp.slot), 2 + size * 0.8, 1e9, (6 * dpr) / (2 + size * 0.8), sp);
+    speciesPlantCache.delete(-hashStr(sp.slot));
+    g.drawImage(sprite, (c.width - sprite.width) / 2, (c.height - sprite.height) / 2);
+    return c;
+  }
+  g.scale(dpr, dpr);
+  const size = sp.traits?.size ?? 3;
+  drawCreature(g, 21, 22, 6 + size * 0.7, -Math.PI / 4, sp.look ?? lookFor(sp), 0.6);
+  return c;
+}
+
+function traitLine(t) {
+  if (!t) return "";
+  const names = { size: "size", speed: "speed", sight: "sight", attack: "attack", defense: "armour", camouflage: "camo", growth: "growth", seedRange: "seed range", thorns: "thorns", toxin: "toxin", toughness: "toughness" };
+  return Object.entries(names).filter(([k]) => t[k]).map(([k, n]) => `${n} ${t[k]}`).join(", ");
+}
+
+function renderLegend() {
+  const el = $("legend");
+  if (!state.species.size) { el.innerHTML = `<div class="meta">No species here yet.</div>`; return; }
+  const pops = state.livePops ?? state.history.at(-1)?.pop ?? {};
+  const max = Math.max(1, ...Object.values(pops));
+  el.innerHTML = "";
+  for (const [slot, s] of state.species) {
+    const n = pops[slot] ?? 0;
+    const row = document.createElement("div");
+    row.className = "sp";
+    row.appendChild(portrait(s));
+    const info = document.createElement("div");
+    info.innerHTML = `<div class="name">${escape(s.name)}</div><div class="traits">${s.diet}${s.ranked === false ? ", background" : ""}${s.traits ? ` · ${traitLine(s.traits)}` : ""}</div>`;
+    row.appendChild(info);
+    const num = document.createElement("div");
+    num.className = "num"; num.textContent = n;
+    row.appendChild(num);
+    const bar = document.createElement("div");
+    bar.className = "bar"; bar.innerHTML = `<div style="width:${(100 * n) / max}%;background:${s.color}"></div>`;
+    row.appendChild(bar);
+    el.appendChild(row);
+  }
+}
+
+function renderChart() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = chart.clientWidth, h = chart.clientHeight;
+  chart.width = w * dpr; chart.height = h * dpr;
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cctx.clearRect(0, 0, w, h);
+  const hist = state.history;
+  if (hist.length < 2) { cctx.fillStyle = "#a3a487"; cctx.font = "12px 'Bricolage Grotesque', sans-serif"; cctx.fillText("Gathering data…", 2, 16); return; }
+  let max = 1;
+  for (const p of hist) for (const v of Object.values(p.pop)) max = Math.max(max, v);
+  const t0 = hist[0].tick, t1 = hist.at(-1).tick;
+  const X = (t) => ((t - t0) / Math.max(1, t1 - t0)) * (w - 4) + 2;
+  const Y = (v) => h - 4 - (v / max) * (h - 18);
+  cctx.strokeStyle = "#ffffff12"; cctx.lineWidth = 1;
+  for (let i = 0; i <= 2; i++) { const y = Y((max * i) / 2); cctx.beginPath(); cctx.moveTo(0, y); cctx.lineTo(w, y); cctx.stroke(); }
+  cctx.fillStyle = "#a3a487"; cctx.font = "11px 'Bricolage Grotesque', sans-serif"; cctx.fillText(String(max), 2, 11);
+  for (const [slot, s] of state.species) {
+    cctx.strokeStyle = s.color; cctx.lineWidth = 2; cctx.lineJoin = "round";
+    cctx.beginPath();
+    hist.forEach((p, i) => { const x = X(p.tick), y = Y(p.pop[slot] ?? 0); i ? cctx.lineTo(x, y) : cctx.moveTo(x, y); });
+    cctx.stroke();
+  }
+  if (state.mode === "replay") {
+    cctx.strokeStyle = "#f4ead088"; const x = X(state.tick);
+    cctx.beginPath(); cctx.moveTo(x, 0); cctx.lineTo(x, h); cctx.stroke();
+  }
+}
+
+// ---------- zoom & pan ----------
+
+function toWorld(ev, rect = canvas.getBoundingClientRect()) {
+  const v = state.view;
+  return [v.x + ((ev.clientX - rect.left) / rect.width) * state.worldSize.w / v.z, v.y + ((ev.clientY - rect.top) / rect.height) * state.worldSize.h / v.z];
+}
+function clampView() {
+  const v = state.view;
+  v.z = Math.min(8, Math.max(1, v.z));
+  v.x = Math.min(Math.max(0, v.x), state.worldSize.w - state.worldSize.w / v.z);
+  v.y = Math.min(Math.max(0, v.y), state.worldSize.h - state.worldSize.h / v.z);
+}
+let drag = null;
+canvas.addEventListener("wheel", (ev) => {
+  ev.preventDefault();
+  const v = state.view;
+  const [wx, wy] = toWorld(ev);
+  const z = v.z * Math.exp(-ev.deltaY * 0.0015);
+  const nz = Math.min(8, Math.max(1, z));
+  v.x = wx - (wx - v.x) * (v.z / nz);
+  v.y = wy - (wy - v.y) * (v.z / nz);
+  v.z = nz;
+  clampView();
+  $("zoomHint").style.display = "none";
+}, { passive: false });
+canvas.addEventListener("pointerdown", (ev) => {
+  drag = { x: ev.clientX, y: ev.clientY, vx: state.view.x, vy: state.view.y };
+  canvas.setPointerCapture(ev.pointerId);
+  canvas.classList.add("dragging");
+});
+canvas.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const rect = canvas.getBoundingClientRect(), v = state.view;
+  v.x = drag.vx - ((ev.clientX - drag.x) / rect.width) * state.worldSize.w / v.z;
+  v.y = drag.vy - ((ev.clientY - drag.y) / rect.height) * state.worldSize.h / v.z;
+  clampView();
+});
+const endDrag = () => { drag = null; canvas.classList.remove("dragging"); };
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("dblclick", () => { state.view = { z: 1, x: 0, y: 0 }; });
+
+// ---------- hover ----------
+
+canvas.addEventListener("mousemove", (ev) => {
+  const rect = canvas.getBoundingClientRect();
+  if (drag) return;
+  const [wx, wy] = toWorld(ev, rect);
+  let best = null, bestD = 14 / state.view.z;
+  for (const e of state.curr.values()) {
+    const d = Math.hypot(e[2] - wx, e[3] - wy) - e[4] * (e[1] === KIND.ANIMAL ? 1.6 : 1);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  const tip = $("tooltip");
+  state.hover = best?.[1] === KIND.ANIMAL ? best[0] : null;
+  if (!best) { tip.style.display = "none"; return; }
+  const sp = state.species.get(best[5]);
+  const label = sp ? escape(sp.name) : best[1] === KIND.PLANT ? "Wild plant" : best[1] === KIND.CORPSE ? "Remains" : "Animal";
+  tip.innerHTML = `<b>${label}</b> <span>#${best[0]}</span><br><span>${best[1] === KIND.CORPSE ? "food left" : "energy"} ${best[6]}${sp ? `, ${sp.diet}` : ""}</span>`;
+  tip.style.display = "block";
+  tip.style.left = ev.clientX + 16 + "px";
+  tip.style.top = ev.clientY + 16 + "px";
+});
+canvas.addEventListener("mouseleave", () => { $("tooltip").style.display = "none"; state.hover = null; });
+
+// ---------- live mode ----------
+
+function reset(mode) {
+  state.ws?.close();
+  state.ws = null;
+  state.mode = mode;
+  state.species = new Map();
+  state.prev = new Map(); state.curr = new Map(); state.walk = new Map();
+  state.history = []; state.stats = null; state.replay = null; state.livePops = null;
+  plantCache.clear();
+  speciesPlantCache.clear();
+  state.view = { z: 1, x: 0, y: 0 };
+  showError();
+}
+
+async function openWorld(id) {
+  reset("live");
+  history.replaceState(null, "", `?world=${id}${token ? `&token=${token}` : ""}`);
+  const info = await api(`/worlds/${id}`);
+  state.worldId = id;
+  state.worldSize = { w: 800, h: 800 };
+  fitCanvas();
+  renderControls(info);
+  const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/worlds/${id}/stream${token ? `?token=${token}` : ""}`);
+  state.ws = ws;
+  ws.onmessage = (m) => {
+    if (state.ws !== ws) return;
+    const msg = JSON.parse(m.data);
+    if (msg.type === "species") setSpecies(msg.species);
+    else if (msg.type === "frame") applyFrame(msg.frame, 1000 / (state.stats?.tps ?? 10));
+    else if (msg.type === "stats") {
+      state.stats = msg;
+      const pop = Object.fromEntries(msg.stats.map((s) => [s.speciesId, s.population]));
+      state.history.push({ tick: msg.tick, pop });
+      if (state.history.length > 400) state.history.shift();
+      state.livePops = pop;
+      renderLegend(); renderChart(); updateControls();
+    } else if (msg.type === "notice") addNotice(msg);
+    else if (msg.type === "error") showError(msg.error);
+  };
+  ws.onclose = () => { if (state.ws === ws) showError("Lost the connection to this world. Pick it again to reconnect."); };
+  highlightLists();
+}
+
+function addNotice(n) {
+  const el = $("notices");
+  if (!el) return;
+  const row = document.createElement("div");
+  row.innerHTML = `<span class="meta">Tick ${n.tick}</span> ${escape(n.message)}`;
+  el.prepend(row);
+  while (el.children.length > 6) el.lastChild.remove();
+}
+
+const control = (body) => api(`/worlds/${state.worldId}/control`, { method: "POST", body: JSON.stringify(body) }).catch(showError);
+
+function renderControls(info) {
+  const c = $("controls");
+  if (state.mode === "live") {
+    c.innerHTML = `<h2>${escape(info.name)} <span class="meta">${info.migration ? "— linked to other worlds" : ""}</span></h2>
+      <div class="row"><button id="toggle">Pause</button><button id="step" disabled>Step one tick</button></div>
+      <div style="margin-top:12px" class="meta">Speed: <span id="tpsLabel">${info.tps ?? 20}</span> ticks a second</div>
+      <input type="range" id="tps" min="1" max="120" value="${info.tps ?? 20}" aria-label="Simulation speed">
+      <div id="notices" class="notices"></div>`;
+    for (const n of (info.notices ?? []).slice().reverse()) addNotice(n);
+    $("toggle").onclick = () => control({ action: state.stats?.paused ? "resume" : "pause" });
+    $("step").onclick = () => control({ action: "step" });
+    $("tps").oninput = (e) => { $("tpsLabel").textContent = e.target.value; };
+    $("tps").onchange = (e) => control({ tps: Number(e.target.value) });
+  } else if (state.mode === "replay") {
+    const r = state.replay;
+    c.innerHTML = `<h2>Replay <span class="meta">— seed ${escape(r.seed)}${r.verified ? ", verified" : ""}</span></h2>
+      <div class="row"><button id="play">Pause</button>
+        <select id="speed" aria-label="Playback speed"><option value="0.5">Half speed</option><option value="1" selected>Normal speed</option><option value="2">2× speed</option><option value="4">4× speed</option><option value="8">8× speed</option></select></div>
+      <input type="range" id="scrub" min="0" max="${r.frames.length - 1}" value="0" style="margin-top:12px" aria-label="Replay position">
+      <div class="scores">${r.scores}</div>`;
+    $("play").onclick = () => { r.playing = !r.playing; $("play").textContent = r.playing ? "Pause" : "Play"; r.last = performance.now(); };
+    $("speed").onchange = (e) => { r.speed = Number(e.target.value); };
+    $("scrub").oninput = (e) => { r.idx = Number(e.target.value); r.acc = 0; showReplayFrame(true); };
+  }
+}
+
+function updateControls() {
+  const paused = state.stats?.paused;
+  const toggle = $("toggle"), step = $("step");
+  if (toggle) toggle.textContent = paused ? "Resume" : "Pause";
+  if (step) step.disabled = !paused;
+}
+
+// ---------- replay mode ----------
+
+async function openReplay(id) {
+  reset("replay");
+  history.replaceState(null, "", `?match=${id}${token ? `&token=${token}` : ""}`);
+  $("controls").innerHTML = `<h2>Replay</h2><div class="meta">Re-running the match on the server and checking it against the recorded result. This takes about as long as the original match.</div>`;
+  state.tick = 0;
+  renderLegend(); renderChart();
+  highlightLists();
+  try {
+    const match = await api(`/matches/${id}`);
+    const every = Math.max(1, Math.ceil(match.result.ticks / 1500));
+    const replay = await api(`/matches/${id}/replay?every=${every}`);
+    if (state.mode !== "replay") return;
+    state.worldSize = { w: match.spec.world.width ?? 800, h: match.spec.world.height ?? 800 };
+    fitCanvas();
+    const diets = Object.fromEntries(match.result.entrants.map((e) => [e.slot, e.stats.diet]));
+    await setSpecies(replay.species.map((s) => ({ ...s, diet: diets[s.slot] })));
+    state.history = match.result.timeline.map((p) => ({ tick: p.tick, pop: p.population }));
+    const scores = match.result.entrants.slice().sort((a, b) => b.score - a.score)
+      .map((e) => `<span>${escape(e.name)}${e.ranked ? "" : ' <span class="meta">(background)</span>'}</span><b>${Number(e.score).toFixed(1)}</b>`).join("");
+    state.replay = { frames: replay.frames, idx: 0, playing: true, speed: 1, acc: 0, last: performance.now(), seed: match.spec.seed, verified: replay.verified, scores };
+    renderControls();
+    showReplayFrame(true);
+  } catch (e) { showError(e); }
+}
+
+function showReplayFrame(jump) {
+  const r = state.replay;
+  const f = r.frames[r.idx];
+  if (!f) return;
+  if (jump) { state.curr = new Map(); state.walk = new Map(); }
+  applyFrame(f, 50 / r.speed);
+  if (jump) state.prev = state.curr;
+  const scrub = $("scrub"); if (scrub) scrub.value = r.idx;
+  const pop = {};
+  for (const e of f.e) if (e[1] === KIND.ANIMAL) pop[e[5]] = (pop[e[5]] ?? 0) + 1;
+  state.livePops = pop;
+  renderLegend(); renderChart();
+}
+
+function advanceReplay() {
+  const r = state.replay;
+  const now = performance.now();
+  r.acc += (now - r.last) * r.speed;
+  r.last = now;
+  let stepped = false;
+  while (r.acc >= 50 && r.idx < r.frames.length - 1) { r.acc -= 50; r.idx++; stepped = true; }
+  if (stepped) showReplayFrame(false);
+  if (r.idx >= r.frames.length - 1) { r.playing = false; const b = $("play"); if (b) b.textContent = "Play"; }
+}
+
+// ---------- lists ----------
+
+async function refreshLists() {
+  try {
+    const worlds = await api("/worlds");
+    $("worlds").innerHTML = worlds.length
+      ? worlds.map((w) => `<div class="item" tabindex="0" data-world="${w.id}"><b>${escape(w.name)}</b> <span class="meta">tick ${w.tick}</span><small>${w.species.map((s) => `${escape(s.name)} ${s.population}`).join(", ") || "Empty so far"}</small></div>`).join("")
+      : `<div class="meta">Nothing running. Start a world below.</div>`;
+    const matches = await api("/matches?limit=15");
+    $("replays").innerHTML = matches.length
+      ? matches.map((m) => `<div class="item" tabindex="0" data-match="${m.id}"><b>${escape(m.entrants.filter((e) => e.ranked).map((e) => e.name).join(" vs "))}</b> <span class="meta">${m.kind}</span><small>Seed ${escape(m.seed)}, ${m.ticks} ticks</small></div>`).join("")
+      : `<div class="meta">Finished matches show up here.</div>`;
+    highlightLists();
+  } catch (e) { showError(e); }
+}
+
+function highlightLists() {
+  const match = new URLSearchParams(location.search).get("match");
+  document.querySelectorAll("[data-world]").forEach((el) => el.classList.toggle("active", state.mode === "live" && el.dataset.world === state.worldId));
+  document.querySelectorAll("[data-match]").forEach((el) => el.classList.toggle("active", state.mode === "replay" && el.dataset.match === match));
+}
+
+function activate(target) {
+  const w = target.closest("[data-world]"); if (w) return openWorld(w.dataset.world).catch(showError);
+  const m = target.closest("[data-match]"); if (m) return openReplay(m.dataset.match);
+}
+document.addEventListener("click", (ev) => activate(ev.target));
+document.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.target.classList?.contains("item")) activate(ev.target); });
+
+$("newWorld").onclick = async () => {
+  try {
+    const builtins = await api("/creatures?builtin=true");
+    const w = await api("/worlds", { method: "POST", body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`, tps: 20 }) });
+    for (const c of builtins) await api(`/worlds/${w.id}/species`, { method: "POST", body: JSON.stringify({ creature: c.codeHash, population: 12 }) });
+    await refreshLists();
+    openWorld(w.id);
+  } catch (e) { showError(e); }
+};
+
+api("/").then((d) => { $("engine").textContent = d.engine; }).catch(() => {});
+fitCanvas();
+requestAnimationFrame(draw);
+refreshLists().then(() => {
+  if (params.get("match")) return openReplay(params.get("match"));
+  const first = params.get("world") ?? document.querySelector("[data-world]")?.dataset.world;
+  if (first) openWorld(first).catch(showError);
+});
+setInterval(refreshLists, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "@terrarium/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --import tsx src/main.ts"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.3.4",
+    "@terrarium/engine": "workspace:^",
+    "@terrarium/sandbox": "workspace:^",
+    "@terrarium/sdk": "workspace:^",
+    "fastify": "^5.12.7",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "ws": "^8.22.1"
+  }
+}
