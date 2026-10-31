@@ -20,6 +20,7 @@
     --rust: #d0694a;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: var(--loam-deep); color: var(--lichen); font: 400 14px/1.5 "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif; }
   body { display: grid; grid-template-columns: 0 minmax(0, 1fr) 330px; height: 100vh; overflow: hidden; transition: grid-template-columns .25s ease;
     background: radial-gradient(ellipse at 40% 30%, #33271c 0%, var(--loam-deep) 70%); }
@@ -77,6 +78,16 @@
   input[type=range] { width: 100%; accent-color: var(--amber); }
   canvas#chart { width: 100%; height: 110px; display: block; }
   .error { color: var(--rust); font-size: 13px; }
+  .me { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+  .avatar.initials { display: grid; place-items: center; background: var(--bark); font-weight: 800; font-size: 18px; }
+  #account details { margin-top: 12px; }
+  #account input, .release select { background: var(--loam-deep); color: var(--lichen); border: 1px solid var(--bark-edge); border-radius: 999px; padding: 6px 12px; font: inherit; flex: 1; min-width: 0; }
+  .keyrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #ffffff0d; font-size: 13px; }
+  .newkey { background: #2c3a1f; border: 1px solid var(--moss); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .newkey code { word-break: break-all; font-size: 12px; color: #e6f0d4; }
+  code { font-size: 12px; }
+  .release { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
   .notices { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
   .notices:empty { display: none; }
   .scores { margin-top: 10px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; }
@@ -136,11 +147,12 @@
 </main>
 <aside>
   <h1>Terrarium</h1>
+  <div id="account"></div>
 
   <div>
     <h2>Live worlds</h2>
     <div class="list" id="worlds"></div>
-    <div class="row" style="margin-top:10px"><button class="primary" id="newWorld">Start a world with the example species</button></div>
+    <div class="row" style="margin-top:10px" id="newWorldRow" hidden><button class="primary" id="newWorld">Start a world with the example species</button></div>
   </div>
 
   <div id="controls"></div>
@@ -168,7 +180,6 @@
 const PALETTE = ["#e8b04a", "#6fc3d6", "#e0709a", "#b9d86b", "#ad94e6", "#f08a4b", "#62d3b2", "#ece6c8", "#8fb4ff", "#ff7a6b"];
 const KIND = { PLANT: 0, ANIMAL: 1, CORPSE: 2 };
 const params = new URLSearchParams(location.search);
-const token = params.get("token");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const $ = (id) => document.getElementById(id);
@@ -176,7 +187,7 @@ const canvas = $("world"), ctx = canvas.getContext("2d");
 const chart = $("chart"), cctx = chart.getContext("2d");
 
 const api = async (path, opts = {}) => {
-  const headers = { ...(opts.body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) };
+  const headers = opts.body ? { "content-type": "application/json" } : {};
   const r = await fetch(path, { ...opts, headers });
   const body = r.status === 204 ? null : await r.json();
   if (!r.ok) throw new Error(body?.error ?? r.statusText);
@@ -1181,13 +1192,13 @@ function reset(mode) {
 
 async function openWorld(id) {
   reset("live");
-  history.replaceState(null, "", `?world=${id}${token ? `&token=${token}` : ""}`);
+  history.replaceState(null, "", `?world=${id}`);
   const info = await api(`/worlds/${id}`);
   state.worldId = id;
   state.worldSize = { w: 800, h: 800 };
   fitCanvas();
   renderControls(info);
-  const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/worlds/${id}/stream${token ? `?token=${token}` : ""}`);
+  const ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/worlds/${id}/stream`);
   state.ws = ws;
   ws.onmessage = (m) => {
     if (state.ws !== ws) return;
@@ -1223,16 +1234,35 @@ const control = (body) => api(`/worlds/${state.worldId}/control`, { method: "POS
 function renderControls(info) {
   const c = $("controls");
   if (state.mode === "live") {
+    const isAdmin = !!auth.user?.isAdmin;
     c.innerHTML = `<h2>${escape(info.name)} <span class="meta">${info.migration ? "— linked to other worlds" : ""}</span></h2>
-      <div class="row"><button id="toggle">Pause</button><button id="step" disabled>Step one tick</button></div>
+      ${isAdmin ? `<div class="row"><button id="toggle">Pause</button><button id="step" disabled>Step one tick</button></div>
       <div style="margin-top:12px" class="meta">Speed: <span id="tpsLabel">${info.tps ?? 20}</span> ticks a second</div>
-      <input type="range" id="tps" min="1" max="120" value="${info.tps ?? 20}" aria-label="Simulation speed">
+      <input type="range" id="tps" min="1" max="120" value="${info.tps ?? 20}" aria-label="Simulation speed">` : ""}
+      ${auth.user ? `<form class="release" id="releaseForm"><div class="meta">Release a creature into this world</div>
+        <div class="row"><select id="releaseWhich" aria-label="Creature to release"><option>Loading…</option></select><button>Release</button></div></form>` : ""}
       <div id="notices" class="notices"></div>`;
     for (const n of (info.notices ?? []).slice().reverse()) addNotice(n);
-    $("toggle").onclick = () => control({ action: state.stats?.paused ? "resume" : "pause" });
-    $("step").onclick = () => control({ action: "step" });
-    $("tps").oninput = (e) => { $("tpsLabel").textContent = e.target.value; };
-    $("tps").onchange = (e) => control({ tps: Number(e.target.value) });
+    if (isAdmin) {
+      $("toggle").onclick = () => control({ action: state.stats?.paused ? "resume" : "pause" });
+      $("step").onclick = () => control({ action: "step" });
+      $("tps").oninput = (e) => { $("tpsLabel").textContent = e.target.value; };
+      $("tps").onchange = (e) => control({ tps: Number(e.target.value) });
+    }
+    if (auth.user) {
+      releasable().then((list) => {
+        const sel = $("releaseWhich");
+        if (!sel) return;
+        sel.innerHTML = list.map((c) => `<option value="${escape(c.codeHash)}">${escape(c.name)} v${c.version}${c.mine ? " (yours)" : c.builtin ? " (example)" : ""}</option>`).join("");
+      }).catch(showError);
+      $("releaseForm").onsubmit = async (ev) => {
+        ev.preventDefault();
+        try {
+          await api(`/worlds/${state.worldId}/species`, { method: "POST", body: JSON.stringify({ creature: $("releaseWhich").value, population: 10 }) });
+          addNotice({ tick: state.tick, message: `Released ${$("releaseWhich").selectedOptions[0].textContent}.` });
+        } catch (e) { showError(e); }
+      };
+    }
   } else if (state.mode === "replay") {
     const r = state.replay;
     c.innerHTML = `<h2>Replay <span class="meta">— seed ${escape(r.seed)}${r.verified ? ", verified" : ""}</span></h2>
@@ -1257,7 +1287,7 @@ function updateControls() {
 
 async function openReplay(id) {
   reset("replay");
-  history.replaceState(null, "", `?match=${id}${token ? `&token=${token}` : ""}`);
+  history.replaceState(null, "", `?match=${id}`);
   $("controls").innerHTML = `<h2>Replay</h2><div class="meta">Re-running the match on the server and checking it against the recorded result. This takes about as long as the original match.</div>`;
   state.tick = 0;
   renderLegend(); renderChart();
@@ -1344,7 +1374,120 @@ $("newWorld").onclick = async () => {
   } catch (e) { showError(e); }
 };
 
+// ---------- account ----------
+
+const auth = { config: null, user: null, keys: null, newKey: null, myCreatures: [] };
+
+async function loadAccount() {
+  try {
+    auth.config = await api("/auth/config");
+    auth.user = (await api("/me")).user;
+    if (auth.user) auth.myCreatures = await api("/creatures?mine=1&limit=200");
+  } catch (e) { showError(e); }
+  renderAccount();
+  if (state.mode === "live" && state.worldId) api(`/worlds/${state.worldId}`).then(renderControls).catch(() => {});
+}
+
+function loadGoogleScript() {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("Could not load Google sign-in. Check your connection or ad blocker."));
+    document.head.appendChild(s);
+  });
+}
+
+async function signedIn(promise) {
+  try {
+    await promise;
+    auth.keys = null;
+    auth.newKey = null;
+    await loadAccount();
+  } catch (e) { showError(e); }
+}
+
+function renderAccount() {
+  $("newWorldRow").hidden = !auth.user?.isAdmin;
+  const el = $("account");
+  const cfg = auth.config;
+  if (!cfg) { el.innerHTML = ""; return; }
+  const u = auth.user;
+  if (!u) {
+    el.innerHTML = `<h2>Your account</h2>
+      <div class="meta" style="margin-bottom:10px">Sign in to upload creatures, test them and release them into worlds.</div>
+      ${cfg.googleClientId ? `<div id="googleButton"></div>` : ""}
+      ${cfg.devLogin ? `<form id="devForm" class="row" style="margin-top:8px"><input id="devName" placeholder="Any name (development sign-in)" aria-label="Name for development sign-in" required><button>Sign in</button></form>` : ""}
+      ${!cfg.googleClientId && !cfg.devLogin ? `<div class="meta">Sign-in is not set up on this server yet.</div>` : ""}`;
+    if (cfg.googleClientId) {
+      loadGoogleScript().then(() => {
+        google.accounts.id.initialize({
+          client_id: cfg.googleClientId,
+          callback: (resp) => signedIn(api("/auth/google", { method: "POST", body: JSON.stringify({ credential: resp.credential }) })),
+        });
+        const target = $("googleButton");
+        if (target) google.accounts.id.renderButton(target, { theme: "filled_black", shape: "pill", text: "signin_with", size: "medium" });
+      }).catch(showError);
+    }
+    const form = $("devForm");
+    if (form) form.onsubmit = (ev) => {
+      ev.preventDefault();
+      signedIn(api("/auth/dev", { method: "POST", body: JSON.stringify({ name: $("devName").value }) }));
+    };
+    return;
+  }
+
+  const avatar = u.picture
+    ? `<img src="${escape(u.picture)}" alt="" referrerpolicy="no-referrer" class="avatar">`
+    : `<span class="avatar initials">${escape(u.name.slice(0, 1).toUpperCase())}</span>`;
+  const keyRows = (auth.keys ?? []).map((k) => `<div class="keyrow"><span><b>${escape(k.name)}</b><br><span class="meta">${escape(k.prefix)}… · ${k.lastUsedAt ? `used ${new Date(k.lastUsedAt).toLocaleDateString()}` : "never used"}</span></span><button data-revoke="${escape(k.id)}">Revoke</button></div>`).join("");
+  el.innerHTML = `<div class="me">${avatar}<div><b>${escape(u.name)}</b>${u.isAdmin ? ' <span class="chip good">admin</span>' : ""}<br><span class="meta">${escape(u.email)} · ${auth.myCreatures.length} creature${auth.myCreatures.length === 1 ? "" : "s"}</span></div><button id="signOut">Sign out</button></div>
+    <details id="keysBox" ${auth.keys ? "open" : ""}><summary>API keys for agents and scripts</summary>
+      <div class="meta" style="margin:8px 0">A key acts as you. Send it as <code>Authorization: Bearer trk_…</code>.</div>
+      ${auth.newKey ? `<div class="newkey"><div><b>Copy this key now.</b> It won't be shown again.</div><code id="newKeyText">${escape(auth.newKey)}</code><button id="copyKey">Copy</button></div>` : ""}
+      <div class="keys">${keyRows || (auth.keys ? `<span class="meta">No keys yet.</span>` : "")}</div>
+      <form id="keyForm" class="row" style="margin-top:8px"><input id="keyName" placeholder="Key name, e.g. my agent" aria-label="New API key name" required maxlength="60"><button>Create key</button></form>
+    </details>`;
+  $("signOut").onclick = () => signedIn(api("/auth/logout", { method: "POST", body: "{}" }).then(() => { window.google?.accounts?.id?.disableAutoSelect?.(); }));
+  $("keysBox").ontoggle = async (ev) => {
+    if (ev.target.open && !auth.keys) {
+      auth.keys = await api("/me/api-keys").catch((e) => (showError(e), []));
+      renderAccount();
+    }
+  };
+  $("keyForm").onsubmit = async (ev) => {
+    ev.preventDefault();
+    try {
+      const created = await api("/me/api-keys", { method: "POST", body: JSON.stringify({ name: $("keyName").value }) });
+      auth.newKey = created.key;
+      auth.keys = await api("/me/api-keys");
+      renderAccount();
+    } catch (e) { showError(e); }
+  };
+  const copy = $("copyKey");
+  if (copy) copy.onclick = () => navigator.clipboard.writeText(auth.newKey).then(() => { copy.textContent = "Copied"; });
+  el.querySelectorAll("[data-revoke]").forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api(`/me/api-keys/${b.dataset.revoke}`, { method: "DELETE" });
+        auth.keys = await api("/me/api-keys");
+        auth.newKey = null;
+        renderAccount();
+      } catch (e) { showError(e); }
+    };
+  });
+}
+
+/** Creatures a signed-in user may release into a live world: their own plus the builtin ones. */
+async function releasable() {
+  const builtins = await api("/creatures?builtin=true");
+  return [...auth.myCreatures.map((c) => ({ ...c, mine: true })), ...builtins];
+}
+
 api("/").then((d) => { $("engine").textContent = d.engine; }).catch(() => {});
+loadAccount();
 fitCanvas();
 requestAnimationFrame(draw);
 refreshLists().then(() => {

@@ -4,11 +4,13 @@ import { CompileError, SandboxController, compileCreature } from "@terrarium/san
 import { now, type CreatureRecord, type CreatureWithCode, type Db } from "./db.js";
 import { UserError } from "./errors.js";
 import { rulesetModules, type EntrantSpec } from "./match.js";
+import type { User } from "./auth.js";
 
 export interface SubmitRequest {
   source: string;
   filename?: string;
-  author?: string;
+  /** The uploader. Null only for builtin species. */
+  owner: User | null;
   description?: string;
   builtin?: boolean;
 }
@@ -36,12 +38,15 @@ export class Registry {
     }
     try {
       const traits = new World(rulesetModules(this.ruleset)).validateTraits(controller.descriptor);
+      const ownerId = req.owner?.id ?? null;
       const record: CreatureWithCode = {
         codeHash: compiled.codeHash,
         name: controller.descriptor.name,
         diet: controller.descriptor.diet,
         traits,
-        author: req.author ?? null,
+        ownerId,
+        version: this.db.nextVersion(ownerId, controller.descriptor.name),
+        author: req.owner?.name ?? (req.builtin ? "builtin" : null),
         description: req.description ?? null,
         builtin: req.builtin ?? false,
         source: req.source,
@@ -63,6 +68,15 @@ export class Registry {
     return c;
   }
 
+  /** Owners and admins may use a creature as their own; builtin species are open to everyone. */
+  canUse(c: CreatureWithCode, user: User): boolean {
+    return c.builtin || c.ownerId === user.id || user.isAdmin;
+  }
+
+  canReadSource(c: CreatureWithCode, user: User | null): boolean {
+    return c.builtin || (!!user && (c.ownerId === user.id || user.isAdmin));
+  }
+
   entrant(c: CreatureWithCode, slot: string, ranked: boolean): EntrantSpec {
     return { slot, codeHash: c.codeHash, code: c.code, name: c.name, ranked };
   }
@@ -71,7 +85,7 @@ export class Registry {
     const out: CreatureRecord[] = [];
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts")).sort()) {
       const source = readFileSync(new URL(file, dir), "utf8");
-      const { creature } = await this.submit({ source, filename: file, author: "builtin", builtin: true });
+      const { creature } = await this.submit({ source, filename: file, owner: null, builtin: true });
       out.push(creature);
     }
     this.db.setBuiltins(out.map((c) => c.codeHash));

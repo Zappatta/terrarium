@@ -40,19 +40,25 @@ let dir: string;
 let services: Awaited<ReturnType<typeof createServices>>;
 let app: FastifyInstance;
 let address: string | undefined;
+let admin: string;
 const listen = async () => (address ??= await app.listen({ port: 0, host: "127.0.0.1" }));
 
-const post = async (url: string, payload: unknown) => {
-  const r = await app.inject({ method: "POST", url, payload: payload as object });
-  return { status: r.statusCode, body: r.json() };
+const login = async (name: string) => {
+  const r = await app.inject({ method: "POST", url: "/auth/dev", payload: { name } });
+  return String(r.headers["set-cookie"]).split(";")[0]!;
 };
-const get = async (url: string) => (await app.inject({ method: "GET", url })).json();
-const submit = async (source: string) => (await post("/creatures", { source, author: "test" })).body.creature.codeHash as string;
+const post = async (url: string, payload: unknown, cookie: string | null = admin) => {
+  const r = await app.inject({ method: "POST", url, payload: payload as object, headers: cookie ? { cookie } : {} });
+  return { status: r.statusCode, body: r.statusCode === 204 ? null : r.json() };
+};
+const get = async (url: string, cookie: string | null = admin) => (await app.inject({ method: "GET", url, headers: cookie ? { cookie } : {} })).json();
+const submit = async (source: string, cookie: string = admin) => (await post("/creatures", { source }, cookie)).body.creature.codeHash as string;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "terrarium-test-"));
-  services = await createServices({ dbPath: join(dir, "t.db"), workers: 2 });
+  services = await createServices({ dbPath: join(dir, "t.db"), workers: 2, devLogin: true, admins: ["admin@dev.local"] });
   app = await createApp(services);
+  admin = await login("Admin");
 });
 
 afterAll(async () => {
@@ -165,7 +171,7 @@ describe("live worlds", () => {
     const t1 = (await get(`/worlds/${world.id}`)).tick;
     await new Promise((r) => setTimeout(r, 300));
     expect((await get(`/worlds/${world.id}`)).tick).toBe(t1);
-    expect((await app.inject({ method: "DELETE", url: `/worlds/${world.id}` })).statusCode).toBe(204);
+    expect((await app.inject({ method: "DELETE", url: `/worlds/${world.id}`, headers: { cookie: admin } })).statusCode).toBe(204);
   });
 
   it("streams the full state of a followed organism", async () => {
@@ -195,7 +201,7 @@ describe("live worlds", () => {
     expect(focus).toMatchObject({ alive: true, kind: "animal" });
     expect(focus.c.energy.max).toBeGreaterThan(0);
     expect(focus.c.species.traits).toBeDefined();
-    await app.inject({ method: "DELETE", url: `/worlds/${world.id}` });
+    await app.inject({ method: "DELETE", url: `/worlds/${world.id}`, headers: { cookie: admin } });
   });
 
   it("recolonises a species that died out", async () => {
@@ -211,7 +217,7 @@ describe("live worlds", () => {
     expect(info.notices.map((n: { message: string }) => n.message)).toEqual(
       expect.arrayContaining([expect.stringContaining("died out"), "4 Phoenix founders arrived."]),
     );
-    await app.inject({ method: "DELETE", url: `/worlds/${w.id}` });
+    await app.inject({ method: "DELETE", url: `/worlds/${w.id}`, headers: { cookie: admin } });
   });
 
   it("moves migrating organisms into another world", async () => {
@@ -230,7 +236,7 @@ describe("live worlds", () => {
       await new Promise((r) => setTimeout(r, 200));
     }
     expect(arrived).toBeGreaterThan(0);
-    await app.inject({ method: "DELETE", url: `/worlds/${a.id}` });
-    await app.inject({ method: "DELETE", url: `/worlds/${b.id}` });
+    await app.inject({ method: "DELETE", url: `/worlds/${a.id}`, headers: { cookie: admin } });
+    await app.inject({ method: "DELETE", url: `/worlds/${b.id}`, headers: { cookie: admin } });
   });
 });

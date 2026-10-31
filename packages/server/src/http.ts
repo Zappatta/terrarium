@@ -12,6 +12,7 @@ import { ENGINE_VERSION } from "./match.js";
 import type { Registry } from "./registry.js";
 import type { RunService } from "./runs.js";
 import type { BatchPool } from "./workers/pool.js";
+import { sessionCookie, readCookie, SESSION_COOKIE, type Auth, type User } from "./auth.js";
 
 export interface Services {
   db: Db;
@@ -19,8 +20,18 @@ export interface Services {
   runs: RunService;
   live: LiveManager;
   pool: BatchPool;
-  token?: string;
+  auth: Auth;
+  secureCookies: boolean;
 }
+
+declare module "fastify" {
+  interface FastifyRequest {
+    user: User | null;
+  }
+}
+
+/** Queued or running runs one non-admin user may have at once. */
+export const MAX_ACTIVE_RUNS_PER_USER = 5;
 
 const SDK_DIR = new URL("../../sdk/", import.meta.url);
 const VIEWER = new URL("../static/viewer.html", import.meta.url);
@@ -48,9 +59,11 @@ const schemas = {
   submit: z.object({
     source: z.string().min(1),
     filename: z.string().max(100).optional(),
-    author: z.string().max(100).optional(),
     description: z.string().max(2000).optional(),
   }),
+  googleSignIn: z.object({ credential: z.string().min(20).max(8000) }),
+  devSignIn: z.object({ name: z.string().min(1).max(40) }),
+  apiKey: z.object({ name: z.string().min(1).max(60) }),
   match: z.object({ entrants: creatureRefs.min(1), background: creatureRefs.optional(), seed: z.string().max(100).optional(), world: worldOverrides.optional(), wait }),
   evaluation: z.object({
     creature: z.string().min(8),
@@ -103,14 +116,32 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
     return reply.status(500).send({ error: "internal error" });
   });
 
-  if (s.token) {
-    app.addHook("onRequest", async (req, reply) => {
-      if (req.url === "/" || req.url === "/health" || req.url.startsWith("/view")) return;
-      const header = req.headers.authorization ?? "";
-      const query = new URL(req.url, "http://x").searchParams.get("token");
-      if (header !== `Bearer ${s.token}` && query !== s.token) return reply.status(401).send({ error: "unauthorised" });
-    });
-  }
+  app.decorateRequest("user", null);
+  app.addHook("onRequest", async (req) => {
+    req.user = s.auth.resolve(req.headers.authorization, req.headers.cookie);
+  });
+
+  const requireUser = (req: { user: User | null }): User => {
+    if (!req.user) throw new UserError("Sign in first. Agents and scripts can send an API key: Authorization: Bearer trk_...", 401);
+    return req.user;
+  };
+  const requireAdmin = (req: { user: User | null }): User => {
+    const u = requireUser(req);
+    if (!u.isAdmin) throw new UserError("Only admins can do this", 403);
+    return u;
+  };
+  const requireUsable = (user: User, refs: string[]) => {
+    for (const ref of refs) {
+      const c = s.registry.resolve(ref);
+      if (!s.registry.canUse(c, user)) throw new UserError(`"${c.name}" belongs to someone else. Use your own creatures or builtin ones.`, 403);
+    }
+  };
+  const checkQuota = (user: User) => {
+    if (!user.isAdmin && s.db.activeRuns(user.id) >= MAX_ACTIVE_RUNS_PER_USER) {
+      throw new UserError(`You already have ${MAX_ACTIVE_RUNS_PER_USER} runs queued or running. Wait for one to finish.`, 429);
+    }
+  };
+  const secure = (req: { headers: Record<string, unknown> }) => s.secureCookies || req.headers["x-forwarded-proto"] === "https";
 
   const finishRun = async (id: string, waitFor: boolean | undefined) =>
     waitFor ? s.runs.waitFor(id, MAX_WAIT_MS) : s.runs.get(id);
@@ -136,12 +167,17 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
       limits: { sandbox: DEFAULT_LIMITS, world: DEFAULT_CONFIG },
     },
     endpoints: {
-      "POST /creatures": "{source, filename?, author?, description?} -> {creature, created}. Compile + validation errors are 400s.",
-      "GET /creatures": "?author=&builtin=true|false&limit=",
-      "GET /creatures/:ref": "?source=1 to include source. ref = code hash or unique prefix (8+ chars).",
-      "POST /evaluations": "{creature, opponents?, background?, seeds?, world?, wait?}. Unranked. Default background = builtin species.",
-      "POST /matches": "{entrants, background?, seed?, world?, wait?}. One unranked match.",
-      "POST /tournaments": "{entrants, background?, format: ffa|round-robin, seeds?, world?, ladder?, wait?}. Rated on ladder (default '<ruleset>/<scoring>'); ladder: null for unrated.",
+      "AUTH": "Browsers sign in with Google (POST /auth/google). Agents and scripts use an API key from POST /me/api-keys: send 'Authorization: Bearer trk_...'. Reading is public; anything that runs code needs an account.",
+      "POST /auth/google": "{credential} Google ID token from Sign in with Google. Sets a session cookie.",
+      "POST /auth/logout": "End the browser session.",
+      "GET /me": "The signed-in user (or null).",
+      "GET /me/api-keys | POST /me/api-keys {name} | DELETE /me/api-keys/:id": "Manage API keys. A new key is shown once.",
+      "POST /creatures": "{source, filename?, description?} -> {creature, created}. Signed in. You own what you upload; re-uploading a species name makes a new version.",
+      "GET /creatures": "?mine=1&builtin=true|false&limit=",
+      "GET /creatures/:ref": "?source=1 includes source, for your own and builtin creatures only. ref = code hash or unique prefix (8+ chars).",
+      "POST /evaluations": "{creature, opponents?, background?, seeds?, world?, wait?}. Signed in, your own or builtin creatures. Unranked. Default background = builtin species.",
+      "POST /matches": "{entrants, background?, seed?, world?, wait?}. Signed in. One unranked match.",
+      "POST /tournaments": "{entrants, background?, format: ffa|round-robin, seeds?, world?, ladder?, wait?}. Signed in; rated ladders (ladder set) are admin only. Admins default to '<ruleset>/<scoring>'.",
       "GET /runs/:id": "Status and summary of a match, evaluation or tournament. ?matches=1 adds per-match results.",
       "GET /runs": "?kind=match|evaluation|tournament",
       "GET /view": "Browser viewer for live worlds (?world=id) and replays (?match=id).",
@@ -149,11 +185,11 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
       "GET /matches/:id": "Full match result: stats, logs, timeline.",
       "GET /matches/:id/replay": "?from=&to=&every= Re-simulates deterministically and returns frames. verified=true when the hash matches.",
       "GET /ladders": "List ladders. GET /ladders/:ladder is the leaderboard.",
-      "POST /worlds": "{name?, world?, tps?, migration?, recolonizeAfter? (ticks, 0 = off, default 500)} Start a live shared world.",
+      "POST /worlds": "{name?, world?, tps?, migration?, recolonizeAfter? (ticks, 0 = off, default 500)} Admin. Start a live shared world.",
       "GET /worlds": "List live worlds. GET /worlds/:id for one.",
-      "POST /worlds/:id/species": "{creature, population?} Add a species to a live world.",
-      "POST /worlds/:id/control": "{action?: pause|resume|step, tps?}",
-      "DELETE /worlds/:id": "Stop a live world.",
+      "POST /worlds/:id/species": "{creature, population?} Signed in, your own or builtin creatures. Add a species to a live world.",
+      "POST /worlds/:id/control": "{action?: pause|resume|step, tps?} Admin.",
+      "DELETE /worlds/:id": "Admin. Stop a live world.",
       "WS /worlds/:id/stream": "Messages: species | frame | stats | notice | focus | error (JSON). Send {type:'follow', id} to receive the full state of one organism as 'focus' messages (id null to stop). Frame entity = [id, kind(0 plant,1 animal,2 corpse), x, y, r, species, energy].",
     },
   }));
@@ -163,6 +199,44 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
   app.get("/matches", async (req) => {
     const q = req.query as { limit?: string };
     return s.db.recentMatches(q.limit ? Math.min(Number(q.limit), 100) : 20);
+  });
+
+  // ---- accounts ----
+
+  app.get("/auth/config", async () => ({ googleClientId: s.auth.opts.googleClientId ?? null, devLogin: !!s.auth.opts.devLogin }));
+
+  app.post("/auth/google", async (req, reply) => {
+    const { credential } = parse(schemas.googleSignIn, req.body);
+    const { user, session } = await s.auth.signInWithGoogle(credential);
+    return reply.header("set-cookie", sessionCookie(session, secure(req))).send({ user });
+  });
+
+  app.post("/auth/dev", async (req, reply) => {
+    const loopback = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+    if (!loopback) throw new UserError("Development sign-in only works from this machine", 403);
+    const { name } = parse(schemas.devSignIn, req.body);
+    const { user, session } = s.auth.signInDev(name);
+    return reply.header("set-cookie", sessionCookie(session, secure(req))).send({ user });
+  });
+
+  app.post("/auth/logout", async (req, reply) => {
+    const session = readCookie(req.headers.cookie, SESSION_COOKIE);
+    if (session) s.auth.signOut(session);
+    return reply.header("set-cookie", sessionCookie("", secure(req), 0)).send({ ok: true });
+  });
+
+  app.get("/me", async (req) => ({ user: req.user }));
+  app.get("/me/api-keys", async (req) => s.db.listApiKeys(requireUser(req).id));
+  app.post("/me/api-keys", async (req, reply) => {
+    const user = requireUser(req);
+    const { name } = parse(schemas.apiKey, req.body);
+    if (s.db.listApiKeys(user.id).length >= 10) throw new UserError("You have 10 API keys. Revoke one first.", 429);
+    return reply.status(201).send({ ...s.auth.createApiKey(user, name), name, note: "Copy this key now. It is not shown again." });
+  });
+  app.delete("/me/api-keys/:id", async (req, reply) => {
+    const user = requireUser(req);
+    if (!s.db.revokeApiKey(user.id, (req.params as { id: string }).id)) throw new UserError("No such API key", 404);
+    return reply.status(204).send();
   });
 
   app.get("/health", async () => ({ ok: true, workers: s.pool.size, busy: s.pool.busy, queued: s.pool.queued }));
@@ -179,15 +253,16 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
   // ---- creatures ----
 
   app.post("/creatures", async (req, reply) => {
+    const owner = requireUser(req);
     const body = parse(schemas.submit, req.body);
-    const out = await s.registry.submit(body);
+    const out = await s.registry.submit({ ...body, owner });
     return reply.status(out.created ? 201 : 200).send(out);
   });
 
   app.get("/creatures", async (req) => {
     const q = req.query as Record<string, string | undefined>;
     return s.db.listCreatures({
-      author: q.author,
+      ownerId: q.mine ? requireUser(req).id : undefined,
       builtin: q.builtin === undefined ? undefined : q.builtin === "true",
       limit: q.limit ? Math.min(Number(q.limit), 500) : undefined,
     });
@@ -195,8 +270,11 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
 
   app.get("/creatures/:ref", async (req) => {
     const { ref } = req.params as { ref: string };
-    const { code: _code, source, ...rest } = s.registry.resolve(ref);
-    return (req.query as { source?: string }).source ? { ...rest, source } : rest;
+    const creature = s.registry.resolve(ref);
+    const { code: _code, source, ...rest } = creature;
+    if (!(req.query as { source?: string }).source) return rest;
+    if (!s.registry.canReadSource(creature, req.user)) throw new UserError("Only the owner can read this creature's code", 403);
+    return { ...rest, source };
   });
 
   // ---- runs ----
@@ -204,15 +282,21 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
   const builtinBackground = () => s.db.listCreatures({ builtin: true }).map((c) => c.codeHash);
 
   app.post("/matches", async (req, reply) => {
+    const user = requireUser(req);
     const b = parse(schemas.match, req.body);
-    const run = s.runs.create({ kind: "match", entrants: b.entrants, background: b.background, seeds: b.seed ? [b.seed] : 1, world: b.world });
+    checkQuota(user);
+    const run = s.runs.create({ kind: "match", createdBy: user.id, entrants: b.entrants, background: b.background, seeds: b.seed ? [b.seed] : 1, world: b.world });
     return reply.status(202).send(await finishRun(run.id, b.wait));
   });
 
   app.post("/evaluations", async (req, reply) => {
+    const user = requireUser(req);
     const b = parse(schemas.evaluation, req.body);
+    requireUsable(user, [b.creature]);
+    checkQuota(user);
     const run = s.runs.create({
       kind: "evaluation",
+      createdBy: user.id,
       name: `evaluation of ${b.creature.slice(0, 12)}`,
       entrants: [b.creature, ...(b.opponents ?? [])],
       background: b.background ?? (b.opponents ? [] : builtinBackground()),
@@ -223,16 +307,21 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
   });
 
   app.post("/tournaments", async (req, reply) => {
+    const user = requireUser(req);
     const b = parse(schemas.tournament, req.body);
+    const ladder = b.ladder === undefined ? (user.isAdmin ? `${s.runs.ruleset}/${SCORING_VERSION}` : null) : b.ladder;
+    if (ladder !== null && !user.isAdmin) throw new UserError("Only admins can run rated tournaments. Leave out 'ladder' for an unrated one.", 403);
+    checkQuota(user);
     const run = s.runs.create({
       kind: "tournament",
+      createdBy: user.id,
       name: b.name,
       entrants: b.entrants,
       background: b.background,
       format: b.format,
       seeds: b.seeds,
       world: b.world,
-      ladder: b.ladder === undefined ? `${s.runs.ruleset}/${SCORING_VERSION}` : b.ladder,
+      ladder,
     });
     return reply.status(202).send(await finishRun(run.id, b.wait));
   });
@@ -264,6 +353,13 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
     const { id } = req.params as { id: string };
     const m = s.db.getMatch(id);
     if (!m) throw new UserError(`Unknown match ${id}`, 404);
+    // A creature's debug logs reveal its strategy: only its owner (or an admin) sees them.
+    if (m.result) {
+      m.result.entrants = m.result.entrants.map((e) => {
+        const c = s.db.getCreature(e.codeHash);
+        return c && s.registry.canReadSource(c, req.user) ? e : { ...e, stats: { ...e.stats, logs: [] } };
+      });
+    }
     return { ...m, progress: s.runs.liveProgress(id) };
   });
 
@@ -284,20 +380,27 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
 
   // ---- live worlds ----
 
-  app.post("/worlds", async (req, reply) => reply.status(201).send(s.live.create(parse(schemas.world, req.body))));
+  app.post("/worlds", async (req, reply) => {
+    requireAdmin(req);
+    return reply.status(201).send(s.live.create(parse(schemas.world, req.body)));
+  });
   app.get("/worlds", async () => s.live.list());
   app.get("/worlds/:id", async (req) => s.live.get((req.params as { id: string }).id));
   app.delete("/worlds/:id", async (req, reply) => {
+    requireAdmin(req);
     await s.live.stop((req.params as { id: string }).id);
     return reply.status(204).send();
   });
   app.post("/worlds/:id/species", async (req, reply) => {
+    const user = requireUser(req);
     const { id } = req.params as { id: string };
     const b = parse(schemas.addSpecies, req.body);
+    requireUsable(user, [b.creature]);
     s.live.addSpecies(id, b.creature, b.population);
     return reply.status(202).send({ ok: true });
   });
   app.post("/worlds/:id/control", async (req) => {
+    requireAdmin(req);
     const { id } = req.params as { id: string };
     const b = parse(schemas.control, req.body);
     if (b.action) s.live.control(id, b.action);

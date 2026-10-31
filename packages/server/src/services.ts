@@ -5,13 +5,20 @@ import { Registry } from "./registry.js";
 import { RunService } from "./runs.js";
 import { BatchPool } from "./workers/pool.js";
 import type { Services } from "./http.js";
+import { Auth, googleVerifier, type GoogleVerifier } from "./auth.js";
 
 export interface ServerOptions {
   dbPath: string;
   workers: number;
   maxLiveWorlds?: number;
-  token?: string;
   seedBuiltins?: boolean;
+  googleClientId?: string;
+  /** Override token verification (tests). Defaults to Google's published keys when googleClientId is set. */
+  verifyGoogle?: GoogleVerifier;
+  admins?: string[];
+  devLogin?: boolean;
+  /** Mark session cookies Secure. Turn on behind HTTPS. */
+  secureCookies?: boolean;
 }
 
 export async function createServices(opts: ServerOptions): Promise<Services & { close(): Promise<void> }> {
@@ -21,13 +28,20 @@ export async function createServices(opts: ServerOptions): Promise<Services & { 
   const pool = new BatchPool(opts.workers);
   const runs = new RunService(db, registry, pool);
   const live = new LiveManager(registry, opts.maxLiveWorlds);
+  const auth = new Auth(db, {
+    admins: opts.admins ?? [],
+    googleClientId: opts.googleClientId,
+    verifyGoogle: opts.verifyGoogle ?? (opts.googleClientId ? googleVerifier(opts.googleClientId) : undefined),
+    devLogin: opts.devLogin,
+  });
   return {
+    auth,
+    secureCookies: opts.secureCookies ?? false,
     db,
     registry,
     runs,
     live,
     pool,
-    token: opts.token,
     async close() {
       await live.closeAll();
       await pool.close();

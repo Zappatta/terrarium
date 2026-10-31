@@ -8,7 +8,7 @@
     "match": "tsx scripts/run-match.ts",
     "balance": "tsx scripts/balance.ts",
     "server": "node --disable-warning=ExperimentalWarning --import tsx packages/server/src/main.ts",
-    "demo": "TERRARIUM_DEMO=1 node --disable-warning=ExperimentalWarning --import tsx packages/server/src/main.ts"
+    "demo": "TERRARIUM_DEMO=1 TERRARIUM_DEV_LOGIN=1 TERRARIUM_ADMINS=${TERRARIUM_ADMINS:-admin@dev.local} node --disable-warning=ExperimentalWarning --import tsx packages/server/src/main.ts"
   },
   "devDependencies": {
     "@terrarium/engine": "workspace:^",

@@ -11,6 +11,7 @@ import type { ReplayResult } from "./workers/protocol.js";
 
 export interface RunRequest {
   kind: RunKind;
+  createdBy?: string | null;
   name?: string;
   entrants: string[];
   background?: string[];
@@ -82,7 +83,7 @@ export class RunService {
         matches.push({ id: randomUUID(), runId: id, index: matches.length, status: "queued", spec: matchSpec, result: null, error: null, createdAt, finishedAt: null });
       }
     }
-    const run: RunRecord = { id, kind: req.kind, status: "queued", spec, summary: null, error: null, matchesTotal: matches.length, matchesDone: 0, createdAt, finishedAt: null };
+    const run: RunRecord = { id, kind: req.kind, createdBy: req.createdBy ?? null, status: "queued", spec, summary: null, error: null, matchesTotal: matches.length, matchesDone: 0, createdAt, finishedAt: null };
     this.db.insertRun(run, matches);
     void this.execute(id);
     return this.db.getRun(id)!;

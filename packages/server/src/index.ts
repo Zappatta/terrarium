@@ -7,3 +7,4 @@ export * from "./runs.js";
 export * from "./live.js";
 export * from "./registry.js";
 export * from "./fitness.js";
+export * from "./auth.js";

@@ -40,11 +40,20 @@ Tick order: `pre` → perceive + decide (all species see the same state) → act
 
 ## Server
 
-`pnpm server` (env: `PORT`=7341, `HOST`=127.0.0.1, `TERRARIUM_DB`=data/terrarium.db, `TERRARIUM_WORKERS`, `TERRARIUM_TOKEN` for bearer auth). `GET /` documents every endpoint; `GET /sdk` serves the creature API so agents can read it.
+`pnpm server` (env: `PORT`=7341, `HOST`=127.0.0.1, `TERRARIUM_DB`=data/terrarium.db, `TERRARIUM_WORKERS`). `GET /` documents every endpoint; `GET /sdk` serves the creature API so agents can read it.
 
 - Evaluations run on fixed `bench-N` seeds (compare versions like for like); tournaments use fresh seeds (no tuning for them).
 - Interrupted runs resume on restart; matches are deterministic so re-running is safe.
 - Live worlds are not reproducible (migration destinations and timing come from the host) and are never rated.
+
+## Accounts
+
+- Browsers sign in with Google. Set `GOOGLE_CLIENT_ID` to a Web OAuth client ID from a GCP project (free; no client secret needed, the server verifies Google's ID tokens itself). Add the site's origin, e.g. `http://localhost:7341`, under Authorized JavaScript origins.
+- `TERRARIUM_ADMINS`: comma-separated emails that may create and control live worlds and run rated tournaments.
+- Agents and scripts use per-user API keys (created in the viewer or via `POST /me/api-keys`), sent as `Authorization: Bearer trk_...`. Keys and sessions are stored only as SHA-256 hashes.
+- Reading (worlds, replays, leaderboards) is public. A creature's source and debug logs are visible only to its owner and admins.
+- `TERRARIUM_DEV_LOGIN=1` allows signing in as any name without Google, from 127.0.0.1 only. `pnpm demo` turns it on and makes `admin@dev.local` an admin: sign in as "admin".
+- Behind HTTPS, set `TERRARIUM_SECURE_COOKIES=1` (or forward `X-Forwarded-Proto: https`).
 
 ## Commands
 

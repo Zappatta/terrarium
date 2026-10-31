@@ -8,11 +8,22 @@ const dbPath = resolve(process.env.TERRARIUM_DB ?? "data/terrarium.db");
 mkdirSync(dirname(dbPath), { recursive: true });
 const workers = Number(process.env.TERRARIUM_WORKERS ?? Math.max(1, availableParallelism() - 1));
 
-const services = await createServices({ dbPath, workers, token: process.env.TERRARIUM_TOKEN || undefined });
+const host = process.env.HOST ?? "127.0.0.1";
+const devLogin = process.env.TERRARIUM_DEV_LOGIN === "1";
+if (devLogin && host !== "127.0.0.1" && host !== "localhost") {
+  throw new Error("TERRARIUM_DEV_LOGIN lets anyone sign in as anyone; it only runs on 127.0.0.1");
+}
+const services = await createServices({
+  dbPath,
+  workers,
+  googleClientId: process.env.GOOGLE_CLIENT_ID || undefined,
+  admins: (process.env.TERRARIUM_ADMINS ?? "").split(","),
+  devLogin,
+  secureCookies: process.env.TERRARIUM_SECURE_COOKIES === "1",
+});
 const resumed = services.runs.resume();
 const app = await createApp(services);
 const port = Number(process.env.PORT ?? 7341);
-const host = process.env.HOST ?? "127.0.0.1";
 await app.listen({ port, host });
 console.log(`terrarium listening on http://${host}:${port} (db ${dbPath}, ${workers} workers, ${resumed} runs resumed)`);
 
