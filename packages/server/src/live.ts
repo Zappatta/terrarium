@@ -5,6 +5,7 @@ import { UserError } from "./errors.js";
 import type { Frame } from "./frames.js";
 import type { WorldOverrides } from "./match.js";
 import type { Registry } from "./registry.js";
+import type { Db, SavedWorld, WorldSpec } from "./db.js";
 import { spawnWorker } from "./workers/spawn.js";
 import type { FocusDetail, LiveCommand, LiveEvent, LiveSpeciesInfo, LiveWorkerData } from "./workers/protocol.js";
 
@@ -22,6 +23,8 @@ export interface CreateLiveWorld {
   tps?: number;
   migration?: boolean;
   recolonizeAfter?: number;
+  /** Species released when the world starts (and again whenever it restarts). */
+  species?: Array<{ creature: string; population?: number }>;
 }
 
 interface Subscriber {
@@ -43,9 +46,17 @@ class LiveWorld {
   notices: Array<{ tick: number; message: string }> = [];
   stopped = false;
   readonly subscribers = new Set<Subscriber>();
-  readonly createdAt = new Date().toISOString();
+  readonly startedAt = new Date().toISOString();
 
-  constructor(readonly id: string, readonly name: string, readonly migration: boolean, readonly worker: Worker) {}
+  constructor(readonly id: string, readonly saved: SavedWorld, readonly worker: Worker) {}
+
+  get name(): string {
+    return this.saved.spec.name;
+  }
+
+  get migration(): boolean {
+    return this.saved.spec.migration;
+  }
 
   send(cmd: LiveCommand): void {
     if (!this.stopped) this.worker.postMessage(cmd);
@@ -73,7 +84,10 @@ class LiveWorld {
       id: this.id,
       name: this.name,
       migration: this.migration,
-      createdAt: this.createdAt,
+      createdAt: this.saved.createdAt,
+      startedAt: this.startedAt,
+      createdBy: this.saved.createdBy,
+      config: { world: this.saved.spec.world, recolonizeAfter: this.saved.spec.recolonizeAfter, startingSpecies: this.saved.spec.species },
       stopped: this.stopped,
       tick: this.lastStats?.tick ?? this.lastFrame?.tick ?? 0,
       tps: this.lastStats?.tps,
@@ -90,34 +104,78 @@ class LiveWorld {
   }
 }
 
-/** Shared, never-ending worlds. Each runs in its own worker; organisms can migrate between them. */
+/**
+ * Shared, never-ending worlds. Each runs in its own worker; organisms can migrate between them.
+ * World definitions (settings and species) are saved, so worlds come back after a restart or
+ * deploy. Their simulation state does not: a restored world starts again from tick 0.
+ */
 export class LiveManager {
   private readonly worlds = new Map<string, LiveWorld>();
 
-  constructor(private readonly registry: Registry, private readonly maxWorlds = 16) {}
+  constructor(private readonly registry: Registry, private readonly db: Db, private readonly maxWorlds = 16) {}
 
-  create(req: CreateLiveWorld) {
-    if ([...this.worlds.values()].filter((w) => !w.stopped).length >= this.maxWorlds) {
-      throw new UserError(`At most ${this.maxWorlds} live worlds`, 429);
-    }
+  create(req: CreateLiveWorld, createdBy: string | null = null) {
+    if (this.worlds.size >= this.maxWorlds) throw new UserError(`At most ${this.maxWorlds} live worlds`, 429);
     const id = randomUUID().slice(0, 8);
-    const data: LiveWorkerData = {
-      worldId: id,
-      name: req.name ?? `world-${id}`,
-      ruleset: STANDARD_RULESET_VERSION,
-      config: req.world ?? {},
+    const species = (req.species ?? []).map((s) => ({ codeHash: this.registry.resolve(s.creature).codeHash, population: s.population ?? 10 }));
+    const spec: WorldSpec = {
+      name: req.name?.trim() || `World ${id}`,
+      world: req.world ?? {},
       tps: req.tps ?? 10,
       migration: req.migration ?? true,
       recolonizeAfter: req.recolonizeAfter ?? 500,
+      species: dedupeSpecies(species),
     };
-    const world = new LiveWorld(id, data.name, data.migration, spawnWorker(new URL("./workers/live-worker.ts", import.meta.url), data));
+    const saved = this.db.saveWorld({ id, spec, createdBy, createdAt: new Date().toISOString() });
+    return this.launch(saved).info();
+  }
+
+  /** Start every saved world. Called once at boot. Returns how many came back. */
+  restoreAll(): number {
+    let n = 0;
+    for (const saved of this.db.listSavedWorlds()) {
+      if (this.worlds.has(saved.id)) continue;
+      this.launch(saved);
+      n++;
+    }
+    return n;
+  }
+
+  savedCount(): number {
+    return this.db.listSavedWorlds().length;
+  }
+
+  private launch(saved: SavedWorld): LiveWorld {
+    const { spec } = saved;
+    const data: LiveWorkerData = {
+      worldId: saved.id,
+      name: spec.name,
+      ruleset: STANDARD_RULESET_VERSION,
+      config: spec.world,
+      tps: spec.tps,
+      migration: spec.migration,
+      recolonizeAfter: spec.recolonizeAfter,
+    };
+    const world = new LiveWorld(saved.id, saved, spawnWorker(new URL("./workers/live-worker.ts", import.meta.url), data));
     world.worker.on("message", (m: LiveEvent) => this.onEvent(world, m));
     world.worker.on("error", (e) => this.fail(world, e instanceof Error ? e.message : String(e)));
     world.worker.on("exit", () => {
       world.stopped = true;
     });
-    this.worlds.set(id, world);
-    return world.info();
+    this.worlds.set(saved.id, world);
+    for (const s of spec.species) {
+      const creature = this.db.getCreature(s.codeHash);
+      if (!creature) {
+        this.fail(world, `Saved species ${s.codeHash.slice(0, 12)} no longer exists`);
+        continue;
+      }
+      world.send({ type: "addSpecies", entrant: this.registry.entrant(creature, slotFor(creature.codeHash), false), population: s.population });
+    }
+    return world;
+  }
+
+  private persist(w: LiveWorld): void {
+    this.db.saveWorld(w.saved);
   }
 
   list() {
@@ -132,6 +190,34 @@ export class LiveManager {
     const w = this.world(id);
     const creature = this.registry.resolve(ref);
     w.send({ type: "addSpecies", entrant: this.registry.entrant(creature, slotFor(creature.codeHash), false), population });
+    if (!w.saved.spec.species.some((s) => s.codeHash === creature.codeHash)) {
+      w.saved.spec.species.push({ codeHash: creature.codeHash, population });
+      this.persist(w);
+    }
+  }
+
+  removeSpecies(id: string, ref: string): void {
+    const w = this.world(id);
+    const creature = this.registry.resolve(ref);
+    const inWorld = w.species.some((s) => s.codeHash === creature.codeHash);
+    const saved = w.saved.spec.species.some((s) => s.codeHash === creature.codeHash);
+    if (!inWorld && !saved) throw new UserError(`${creature.name} is not in this world`, 404);
+    w.send({ type: "removeSpecies", slot: slotFor(creature.codeHash) });
+    w.saved.spec.species = w.saved.spec.species.filter((s) => s.codeHash !== creature.codeHash);
+    this.persist(w);
+  }
+
+  rename(id: string, name: string): void {
+    const w = this.world(id);
+    w.saved.spec.name = name.trim().slice(0, 100) || w.saved.spec.name;
+    this.persist(w);
+  }
+
+  /** Throw away the simulation state and start again from the saved definition. */
+  async restart(id: string): Promise<void> {
+    const w = this.world(id);
+    await this.terminate(w);
+    this.launch(w.saved);
   }
 
   control(id: string, action: "pause" | "resume" | "step"): void {
@@ -139,7 +225,10 @@ export class LiveManager {
   }
 
   setTps(id: string, tps: number): void {
-    this.world(id).send({ type: "setTps", tps });
+    const w = this.world(id);
+    w.send({ type: "setTps", tps });
+    w.saved.spec.tps = tps;
+    this.persist(w);
   }
 
   subscribe(id: string, fn: (msg: LiveMessage) => void): Subscription {
@@ -161,17 +250,25 @@ export class LiveManager {
     };
   }
 
+  /** Delete a world for good: stop it and forget its saved definition. */
   async stop(id: string): Promise<void> {
     const w = this.world(id);
+    await this.terminate(w);
+    this.db.deleteSavedWorld(id);
+  }
+
+  private async terminate(w: LiveWorld): Promise<void> {
     w.send({ type: "stop" });
     w.stopped = true;
     await w.worker.terminate();
+    for (const s of w.subscribers) s.send({ type: "error", error: "This world was restarted or deleted. Pick it again from the list." });
     w.subscribers.clear();
-    this.worlds.delete(id);
+    this.worlds.delete(w.id);
   }
 
+  /** Shut down without forgetting anything: saved worlds come back on the next start. */
   async closeAll(): Promise<void> {
-    await Promise.all([...this.worlds.keys()].map((id) => this.stop(id)));
+    await Promise.all([...this.worlds.values()].map((w) => this.terminate(w)));
   }
 
   private world(id: string): LiveWorld {
@@ -219,6 +316,11 @@ export class LiveManager {
         return;
     }
   }
+}
+
+function dedupeSpecies(list: WorldSpec["species"]): WorldSpec["species"] {
+  const seen = new Set<string>();
+  return list.filter((s) => (seen.has(s.codeHash) ? false : (seen.add(s.codeHash), true)));
 }
 
 /** Same creature, same slot in every live world, so migrants land in their own species. */

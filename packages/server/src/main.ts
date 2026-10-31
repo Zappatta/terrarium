@@ -27,14 +27,13 @@ const port = Number(process.env.PORT ?? 7341);
 await app.listen({ port, host });
 console.log(`terrarium listening on http://${host}:${port} (db ${dbPath}, ${workers} workers, ${resumed} runs resumed)`);
 
-if (process.env.TERRARIUM_DEMO) {
-  // Two linked worlds stocked with the builtin species, so there is something to watch immediately.
-  const builtins = services.db.listCreatures({ builtin: true });
-  for (const name of ["Meadow", "Badlands"]) {
-    const w = services.live.create({ name, tps: 20 });
-    for (const c of builtins) services.live.addSpecies(w.id, c.codeHash, 12);
-  }
-  console.log(`demo worlds running: open http://${host}:${port}/view`);
+const restored = services.live.restoreAll();
+if (restored) console.log(`${restored} saved live world(s) restored`);
+if (process.env.TERRARIUM_DEMO && services.live.savedCount() === 0) {
+  // First run: two linked worlds stocked with the builtin species, so there is something to watch.
+  const species = services.db.listCreatures({ builtin: true }).map((c) => ({ creature: c.codeHash, population: 12 }));
+  for (const name of ["Meadow", "Badlands"]) services.live.create({ name, tps: 20, species });
+  console.log(`demo worlds created: open http://${host}:${port}/view`);
 }
 
 let closing = false;

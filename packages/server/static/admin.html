@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terrarium Backoffice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --loam: #2a1f17; --loam-deep: #1d1510; --bark: #3a2c20; --bark-edge: #4f3d2c;
+    --lichen: #d8dcbc; --lichen-dim: #a3a487; --moss: #7f9b5a; --amber: #e3a948; --rust: #d0694a;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--loam-deep); color: var(--lichen); font: 400 14px/1.5 "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif; }
+  a { color: var(--amber); }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 22px 28px 0; }
+  h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: -.035em; }
+  header .who { margin-left: auto; color: var(--lichen-dim); }
+  main { padding: 18px 28px 60px; max-width: 1300px; }
+  .strip { display: flex; flex-wrap: wrap; gap: 28px; padding: 14px 0 18px; border-bottom: 1px solid #ffffff12; }
+  .strip div { display: flex; flex-direction: column; }
+  .strip b { font-size: 26px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .strip span { color: var(--lichen-dim); font-size: 12.5px; }
+  nav { display: flex; gap: 4px; margin: 18px 0; }
+  nav button { background: none; border: 0; color: var(--lichen-dim); font: 600 15px "Bricolage Grotesque", sans-serif; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  nav button[aria-selected="true"] { background: var(--bark); color: var(--lichen); }
+  button.btn, select, input { font: inherit; color: var(--lichen); background: var(--bark); border: 1px solid var(--bark-edge); border-radius: 999px; padding: 6px 14px; }
+  button.btn { cursor: pointer; font-weight: 600; }
+  button.btn:hover { border-color: var(--amber); }
+  button.primary { background: var(--amber); color: #2a1a0a; border-color: var(--amber); }
+  button.danger { color: #f3b3a3; border-color: #6b2f22; }
+  button.danger.armed { background: var(--rust); color: #1d0e08; border-color: var(--rust); }
+  input, select { background: var(--loam-deep); }
+  input[type=checkbox] { accent-color: var(--amber); }
+  input[type=range] { accent-color: var(--amber); padding: 0; border: 0; background: none; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meta { color: var(--lichen-dim); font-size: 12.5px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--lichen-dim); font-weight: 600; font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid #ffffff14; }
+  td { padding: 9px 10px; border-bottom: 1px solid #ffffff0b; vertical-align: top; }
+  td.num { font-variant-numeric: tabular-nums; }
+  tr.world { cursor: pointer; }
+  tr.world:hover td { background: #ffffff05; }
+  tr.world.open td { background: #ffffff08; }
+  .pill { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; border: 1px solid var(--bark-edge); }
+  .pill.on { border-color: var(--moss); color: #cfe3b0; }
+  .pill.off { border-color: #6b2f22; color: #f3b3a3; }
+  .pill.admin { border-color: var(--amber); color: var(--amber); }
+  .sp { display: inline-flex; gap: 4px; align-items: baseline; margin: 0 10px 2px 0; white-space: nowrap; }
+  .sp b { font-variant-numeric: tabular-nums; }
+  .panel { background: var(--loam); border-radius: 14px; padding: 18px; margin: 4px 0 10px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; }
+  .panel h3 { margin: 0 0 10px; font-size: 15px; }
+  .speciesrow { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid #ffffff0b; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { color: var(--lichen-dim); font-size: 12.5px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .create { background: var(--loam); border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+  .create h2 { margin: 0 0 12px; font-size: 17px; }
+  .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 14px; margin: 10px 0; }
+  .picker label { display: flex; gap: 8px; align-items: center; }
+  .picker input[type=number] { width: 64px; padding: 2px 8px; }
+  .notices { font-size: 12.5px; color: var(--lichen-dim); display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+  .error { color: #f3b3a3; }
+  .gate { max-width: 520px; margin: 80px auto; text-align: center; }
+  pre.code { background: var(--loam-deep); border-radius: 10px; padding: 14px; max-height: 60vh; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+  dialog { background: var(--loam); color: var(--lichen); border: 1px solid var(--bark-edge); border-radius: 16px; width: min(900px, 92vw); }
+  dialog::backdrop { background: #000a; }
+  #toast { position: fixed; bottom: 20px; right: 20px; background: var(--bark); border: 1px solid var(--bark-edge); border-radius: 12px; padding: 10px 14px; max-width: 420px; }
+  @media (max-width: 800px) {
+    .panel { grid-template-columns: 1fr; }
+    header, main { padding-left: 16px; padding-right: 16px; }
+    table, thead, tbody, tr, td, th { font-size: 13px; }
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Backoffice</h1>
+  <a href="/view">Open the viewer</a>
+  <span class="who" id="who"></span>
+</header>
+
+<div class="gate" id="gate" hidden></div>
+
+<main id="app" hidden>
+  <section class="strip" id="strip" aria-label="Overview"></section>
+
+  <nav role="tablist">
+    <button role="tab" data-tab="worlds" aria-selected="true">Worlds</button>
+    <button role="tab" data-tab="users" aria-selected="false">Users</button>
+    <button role="tab" data-tab="creatures" aria-selected="false">Creatures</button>
+    <button role="tab" data-tab="runs" aria-selected="false">Runs</button>
+  </nav>
+
+  <section data-panel="worlds">
+    <div class="row" style="margin-bottom:14px"><button class="btn primary" id="toggleCreate">New world</button>
+      <span class="meta">Worlds are saved and come back after restarts and deploys, starting again from tick 0.</span></div>
+    <form class="create" id="createForm" hidden>
+      <h2>New world</h2>
+      <div class="grid">
+        <div class="field"><label for="cName">Name</label><input id="cName" required maxlength="100" placeholder="e.g. Tidepool"></div>
+        <div class="field"><label for="cTps">Speed (ticks a second)</label><input id="cTps" type="number" min="1" max="200" value="20"></div>
+        <div class="field"><label for="cW">Width</label><input id="cW" type="number" min="100" max="4000" value="800"></div>
+        <div class="field"><label for="cH">Height</label><input id="cH" type="number" min="100" max="4000" value="800"></div>
+        <div class="field"><label for="cRecol">Recolonise after (ticks, 0 = never)</label><input id="cRecol" type="number" min="0" max="100000" value="500"></div>
+        <div class="field"><label for="cSeed">Seed (optional)</label><input id="cSeed" maxlength="100" placeholder="random"></div>
+      </div>
+      <label class="row" style="margin-top:12px"><input type="checkbox" id="cMigration" checked> Linked to other worlds (creatures can migrate)</label>
+      <div style="margin-top:14px"><b>Starting species</b> <span class="meta">tick to include, number = starting population</span></div>
+      <div class="picker" id="cSpecies"></div>
+      <div class="row"><button class="btn primary">Create world</button><button type="button" class="btn" id="cancelCreate">Cancel</button><span class="error" id="createError"></span></div>
+    </form>
+    <table>
+      <thead><tr><th>World</th><th class="num">Tick</th><th class="num hide-sm">Speed</th><th>Status</th><th>Species</th><th class="num hide-sm">Watching</th></tr></thead>
+      <tbody id="worlds"></tbody>
+    </table>
+  </section>
+
+  <section data-panel="users" hidden>
+    <table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th class="num">Creatures</th><th class="num">API keys</th><th class="hide-sm">Last signed in</th><th class="hide-sm">Joined</th></tr></thead><tbody id="users"></tbody></table>
+  </section>
+
+  <section data-panel="creatures" hidden>
+    <table><thead><tr><th>Creature</th><th>Owner</th><th>Diet</th><th class="hide-sm">Build</th><th class="hide-sm">Uploaded</th><th></th></tr></thead><tbody id="creatures"></tbody></table>
+  </section>
+
+  <section data-panel="runs" hidden>
+    <table><thead><tr><th>Run</th><th>Kind</th><th>Status</th><th class="num">Matches</th><th>Started by</th><th class="hide-sm">Created</th></tr></thead><tbody id="runs"></tbody></table>
+  </section>
+</main>
+
+<dialog id="codeDialog"><div class="row" style="justify-content:space-between"><b id="codeTitle"></b><button class="btn" id="closeCode">Close</button></div><pre class="code" id="codeBody"></pre></dialog>
+<div id="toast" hidden role="status"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const when = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—");
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { ...opts, headers: opts.body ? { "content-type": "application/json" } : {} });
+  const body = r.status === 204 ? null : await r.json().catch(() => null);
+  if (!r.ok) throw new Error(body?.error ?? r.statusText);
+  return body;
+};
+let toastTimer;
+function toast(msg, isError) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = isError ? "error" : "";
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+}
+const fail = (e) => toast(e.message ?? String(e), true);
+
+/** Destructive buttons need a second click within 3 seconds; no browser dialogs. */
+function armed(button, action) {
+  button.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (!button.classList.contains("armed")) {
+      button.dataset.label = button.textContent;
+      button.textContent = button.dataset.confirm;
+      button.classList.add("armed");
+      setTimeout(() => { button.classList.remove("armed"); button.textContent = button.dataset.label; }, 3000);
+      return;
+    }
+    button.classList.remove("armed");
+    button.textContent = button.dataset.label;
+    button.disabled = true;
+    try { await action(); } catch (e) { fail(e); } finally { button.disabled = false; }
+  });
+}
+
+const state = { tab: "worlds", open: new Set(), creatures: [], worlds: [] };
+
+// ---------- overview ----------
+
+async function loadOverview() {
+  const o = await api("/admin/overview");
+  const runs = o.runs ?? {};
+  const items = [
+    [o.worlds, "live worlds"], [o.users, "users"], [o.creatures - o.builtinCreatures, "uploaded creatures"],
+    [(runs.queued ?? 0) + (runs.running ?? 0), "runs waiting or running"], [o.matches, "matches played"],
+    [`${o.pool.busy}/${o.pool.workers}`, `match workers busy${o.pool.queued ? `, ${o.pool.queued} queued` : ""}`],
+  ];
+  $("strip").innerHTML = items.map(([v, l]) => `<div><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join("") + `<div><span style="margin-top:auto">${esc(o.engine)}</span></div>`;
+}
+
+// ---------- worlds ----------
+
+async function loadCreatures() {
+  state.creatures = await api("/creatures?limit=500");
+}
+
+function creatureLabel(c) {
+  return `${c.name} v${c.version}${c.builtin ? " (example)" : c.author ? ` · ${c.author}` : ""}`;
+}
+
+function renderCreatePicker() {
+  $("cSpecies").innerHTML = state.creatures.map((c) => `<label><input type="checkbox" value="${esc(c.codeHash)}" ${c.builtin ? "checked" : ""}>
+    <input type="number" min="0" max="100" value="${c.diet === "plant" ? 15 : 10}" aria-label="Starting population of ${esc(c.name)}"> ${esc(creatureLabel(c))}</label>`).join("");
+}
+
+async function loadWorlds() {
+  state.worlds = await api("/worlds");
+  const body = $("worlds");
+  if (!state.worlds.length) {
+    body.innerHTML = `<tr><td colspan="6" class="meta">No live worlds. Create one with “New world”.</td></tr>`;
+    return;
+  }
+  // Keep open panels' form inputs intact: only rebuild a panel when it is not being edited.
+  const active = document.activeElement;
+  const editing = (active && body.contains(active) && active.matches("input, select, textarea")) || body.querySelector(".armed");
+  if (editing) { updateWorldNumbers(); return; }
+  body.innerHTML = state.worlds.map((w) => worldRows(w)).join("");
+  for (const w of state.worlds) wireWorld(w);
+}
+
+function speciesSummary(w) {
+  return w.species.length ? w.species.map((s) => `<span class="sp">${esc(s.name)} <b>${s.population}</b></span>`).join("") : `<span class="meta">none</span>`;
+}
+
+function worldRows(w) {
+  const open = state.open.has(w.id);
+  const status = w.paused ? `<span class="pill off">paused</span>` : `<span class="pill on">running</span>`;
+  const errors = w.errors?.length ? ` <span class="pill off" title="${esc(w.errors.at(-1))}">${w.errors.length} error${w.errors.length > 1 ? "s" : ""}</span>` : "";
+  const row = `<tr class="world ${open ? "open" : ""}" data-world="${esc(w.id)}" tabindex="0" aria-expanded="${open}">
+    <td><b>${esc(w.name)}</b><div class="meta">${esc(w.id)}${w.migration ? " · linked" : ""}</div></td>
+    <td class="num" data-tick>${w.tick}</td><td class="num hide-sm">${w.tps ?? "—"}</td>
+    <td>${status}${errors}</td><td data-species>${speciesSummary(w)}</td><td class="num hide-sm">${w.spectators}</td></tr>`;
+  if (!open) return row;
+  const inWorld = new Set(w.species.map((s) => s.codeHash));
+  const options = state.creatures.filter((c) => !inWorld.has(c.codeHash)).map((c) => `<option value="${esc(c.codeHash)}">${esc(creatureLabel(c))}</option>`).join("");
+  return row + `<tr><td colspan="6"><div class="panel">
+    <div>
+      <h3>Species</h3>
+      ${w.species.map((s) => `<div class="speciesrow"><span>${esc(s.name)} <span class="meta">${esc(s.diet)}</span></span><span class="num"><b>${s.population}</b> alive</span>
+        <button class="btn danger" data-remove="${esc(s.codeHash)}" data-confirm="Remove ${esc(s.name)}?">Remove</button></div>`).join("") || `<div class="meta">No species yet.</div>`}
+      <form class="row" data-add style="margin-top:12px">
+        <select name="creature" aria-label="Species to add" ${options ? "" : "disabled"}>${options || "<option>Every creature is already here</option>"}</select>
+        <input name="population" type="number" min="1" max="100" value="10" style="width:76px" aria-label="Population">
+        <button class="btn" ${options ? "" : "disabled"}>Add species</button>
+      </form>
+      <div class="notices">${(w.notices ?? []).slice(-5).reverse().map((n) => `<div>Tick ${n.tick}: ${esc(n.message)}</div>`).join("")}</div>
+    </div>
+    <div>
+      <h3>Settings</h3>
+      <form class="row" data-rename><input name="name" value="${esc(w.name)}" maxlength="100" aria-label="World name"><button class="btn">Rename</button></form>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" data-toggle>${w.paused ? "Resume" : "Pause"}</button>
+        <label class="row">Speed <input type="range" min="1" max="120" value="${w.tps ?? 20}" data-tps aria-label="Speed"> <span data-tpslabel>${w.tps ?? 20}</span></label>
+      </div>
+      <div class="meta" style="margin-top:12px">${w.config?.world?.width ?? 800}×${w.config?.world?.height ?? 800} · recolonise after ${w.config?.recolonizeAfter ?? 500} ticks · created ${esc(when(w.createdAt))} · running since ${esc(when(w.startedAt))}</div>
+      <div class="row" style="margin-top:14px">
+        <a class="btn" href="/view?world=${esc(w.id)}" style="text-decoration:none">Watch</a>
+        <button class="btn danger" data-restart data-confirm="Restart from tick 0?">Restart</button>
+        <button class="btn danger" data-delete data-confirm="Delete for good?">Delete world</button>
+      </div>
+    </div>
+  </div></td></tr>`;
+}
+
+function updateWorldNumbers() {
+  for (const w of state.worlds) {
+    const row = document.querySelector(`tr[data-world="${CSS.escape(w.id)}"]`);
+    if (!row) continue;
+    row.querySelector("[data-tick]").textContent = w.tick;
+    row.querySelector("[data-species]").innerHTML = speciesSummary(w);
+  }
+}
+
+function wireWorld(w) {
+  const row = document.querySelector(`tr[data-world="${CSS.escape(w.id)}"]`);
+  const toggleOpen = () => { state.open.has(w.id) ? state.open.delete(w.id) : state.open.add(w.id); loadWorlds().catch(fail); };
+  row.onclick = toggleOpen;
+  row.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleOpen(); } };
+  if (!state.open.has(w.id)) return;
+  const panel = row.nextElementSibling;
+  const act = (fn, msg) => async () => { try { await fn(); toast(msg); await refresh(); } catch (e) { fail(e); } };
+  panel.querySelectorAll("[data-remove]").forEach((b) => armed(b, act(() => api(`/worlds/${w.id}/species/${b.dataset.remove}`, { method: "DELETE" }), "Species removed.")));
+  armed(panel.querySelector("[data-restart]"), act(() => api(`/worlds/${w.id}/restart`, { method: "POST" }), `${w.name} restarted.`));
+  armed(panel.querySelector("[data-delete]"), act(async () => { await api(`/worlds/${w.id}`, { method: "DELETE" }); state.open.delete(w.id); }, `${w.name} deleted.`));
+  panel.querySelector("[data-toggle]").onclick = act(() => api(`/worlds/${w.id}/control`, { method: "POST", body: JSON.stringify({ action: w.paused ? "resume" : "pause" }) }), w.paused ? "Resumed." : "Paused.");
+  const tps = panel.querySelector("[data-tps]");
+  tps.oninput = () => { panel.querySelector("[data-tpslabel]").textContent = tps.value; };
+  tps.onchange = act(() => api(`/worlds/${w.id}`, { method: "PATCH", body: JSON.stringify({ tps: Number(tps.value) }) }), "Speed saved.");
+  panel.querySelector("[data-rename]").onsubmit = (ev) => {
+    ev.preventDefault();
+    act(() => api(`/worlds/${w.id}`, { method: "PATCH", body: JSON.stringify({ name: ev.target.name.value }) }), "Renamed.")();
+  };
+  panel.querySelector("[data-add]").onsubmit = (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    act(() => api(`/worlds/${w.id}/species`, { method: "POST", body: JSON.stringify({ creature: f.creature.value, population: Number(f.population.value) }) }), "Species added. It appears within a moment.")();
+  };
+}
+
+$("toggleCreate").onclick = () => { $("createForm").hidden = !$("createForm").hidden; if (!$("createForm").hidden) { renderCreatePicker(); $("cName").focus(); } };
+$("cancelCreate").onclick = () => { $("createForm").hidden = true; };
+$("createForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  $("createError").textContent = "";
+  const species = [...$("cSpecies").querySelectorAll("label")].filter((l) => l.querySelector("input[type=checkbox]").checked)
+    .map((l) => ({ creature: l.querySelector("input[type=checkbox]").value, population: Number(l.querySelector("input[type=number]").value) }));
+  const world = { width: Number($("cW").value), height: Number($("cH").value) };
+  if ($("cSeed").value.trim()) world.seed = $("cSeed").value.trim();
+  try {
+    const w = await api("/worlds", { method: "POST", body: JSON.stringify({ name: $("cName").value, tps: Number($("cTps").value), migration: $("cMigration").checked, recolonizeAfter: Number($("cRecol").value), world, species }) });
+    $("createForm").hidden = true;
+    $("createForm").reset();
+    state.open.add(w.id);
+    toast(`${w.name} created.`);
+    await refresh();
+  } catch (e) { $("createError").textContent = e.message; }
+};
+
+// ---------- users, creatures, runs ----------
+
+async function loadUsers() {
+  const users = await api("/admin/users");
+  $("users").innerHTML = users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="meta">${esc(u.provider)}</div></td><td>${esc(u.email)}</td>
+    <td>${u.isAdmin ? '<span class="pill admin">admin</span>' : "player"}</td><td class="num">${u.creatures}</td><td class="num">${u.apiKeys}</td>
+    <td class="hide-sm">${esc(when(u.lastSeen))}</td><td class="hide-sm">${esc(when(u.createdAt))}</td></tr>`).join("") || `<tr><td colspan="7" class="meta">Nobody has signed in yet.</td></tr>`;
+}
+
+function traitLine(t) {
+  return Object.entries(t ?? {}).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ");
+}
+
+async function loadCreatureTable() {
+  await loadCreatures();
+  $("creatures").innerHTML = state.creatures.map((c) => `<tr><td><b>${esc(c.name)}</b> <span class="meta">v${c.version}</span><div class="meta">${esc(c.codeHash.slice(0, 12))}</div></td>
+    <td>${c.builtin ? '<span class="pill">example</span>' : esc(c.author ?? "—")}</td><td>${esc(c.diet)}</td>
+    <td class="hide-sm meta">${esc(traitLine(c.traits))}</td><td class="hide-sm">${esc(when(c.createdAt))}</td>
+    <td><button class="btn" data-code="${esc(c.codeHash)}">Code</button></td></tr>`).join("");
+  $("creatures").querySelectorAll("[data-code]").forEach((b) => {
+    b.onclick = async () => {
+      try {
+        const c = await api(`/creatures/${b.dataset.code}?source=1`);
+        $("codeTitle").textContent = `${c.name} v${c.version}${c.author ? ` by ${c.author}` : ""}`;
+        $("codeBody").textContent = c.source;
+        $("codeDialog").showModal();
+      } catch (e) { fail(e); }
+    };
+  });
+}
+$("closeCode").onclick = () => $("codeDialog").close();
+
+async function loadRuns() {
+  const runs = await api("/admin/runs");
+  const pill = (s) => `<span class="pill ${s === "done" ? "on" : s === "failed" ? "off" : ""}">${esc(s)}</span>`;
+  $("runs").innerHTML = runs.map((r) => `<tr><td><b>${esc(r.spec.name)}</b>${r.error ? `<div class="meta error">${esc(r.error)}</div>` : ""}</td><td>${esc(r.kind)}${r.spec.ladder ? ` <span class="meta">rated</span>` : ""}</td>
+    <td>${pill(r.status)}</td><td class="num">${r.matchesDone}/${r.matchesTotal}</td><td>${esc(r.createdByName ?? "—")}</td><td class="hide-sm">${esc(when(r.createdAt))}</td></tr>`).join("") || `<tr><td colspan="6" class="meta">No runs yet.</td></tr>`;
+}
+
+// ---------- shell ----------
+
+const loaders = { worlds: loadWorlds, users: loadUsers, creatures: loadCreatureTable, runs: loadRuns };
+async function refresh() {
+  await Promise.all([loadOverview(), loaders[state.tab]()]);
+}
+
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => {
+    state.tab = b.dataset.tab;
+    document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+    document.querySelectorAll("[data-panel]").forEach((p) => { p.hidden = p.dataset.panel !== state.tab; });
+    refresh().catch(fail);
+  };
+});
+
+(async () => {
+  const { user } = await api("/me");
+  if (!user || !user.isAdmin) {
+    $("gate").hidden = false;
+    $("gate").innerHTML = user
+      ? `<h2>Admins only</h2><p>You're signed in as ${esc(user.email)}, which isn't an admin account.</p><p><a href="/view">Back to the viewer</a></p>`
+      : `<h2>Admins only</h2><p>Sign in on the <a href="/view">viewer</a> with an admin account, then come back here.</p>`;
+    return;
+  }
+  $("who").textContent = `Signed in as ${user.name}`;
+  $("app").hidden = false;
+  await loadCreatures();
+  await refresh();
+  setInterval(() => { if (state.tab === "worlds" || state.tab === "runs") refresh().catch(() => {}); else loadOverview().catch(() => {}); }, 2000);
+})().catch(fail);
+</script>
+</body>
+</html>

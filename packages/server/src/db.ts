@@ -69,6 +69,28 @@ export interface ApiKeyRecord {
   lastUsedAt: string | null;
 }
 
+export interface WorldSpec {
+  name: string;
+  world: Record<string, unknown>;
+  tps: number;
+  migration: boolean;
+  recolonizeAfter: number;
+  species: Array<{ codeHash: string; population: number }>;
+}
+
+export interface SavedWorld {
+  id: string;
+  spec: WorldSpec;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export interface UserSummary extends UserRecord {
+  creatures: number;
+  apiKeys: number;
+  lastSeen: string | null;
+}
+
 export interface RunRecord {
   id: string;
   kind: RunKind;
@@ -144,6 +166,13 @@ CREATE TABLE IF NOT EXISTS api_keys (
   last_used_at TEXT,
   revoked_at TEXT
 );
+CREATE TABLE IF NOT EXISTS live_worlds (
+  id TEXT PRIMARY KEY,
+  spec TEXT NOT NULL,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ratings (
   ladder TEXT NOT NULL,
   code_hash TEXT NOT NULL,
@@ -176,6 +205,74 @@ export class Db {
     if (!has("creatures", "version")) this.sql.exec("ALTER TABLE creatures ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
     if (!has("runs", "created_by")) this.sql.exec("ALTER TABLE runs ADD COLUMN created_by TEXT");
     this.sql.exec("CREATE INDEX IF NOT EXISTS creatures_owner ON creatures(owner_id, name)");
+  }
+
+  // ---- saved live worlds ----
+
+  saveWorld(w: SavedWorld): SavedWorld {
+    this.sql
+      .prepare(
+        `INSERT INTO live_worlds (id, spec, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET spec = excluded.spec, updated_at = excluded.updated_at`,
+      )
+      .run(w.id, JSON.stringify(w.spec), w.createdBy, w.createdAt, now());
+    return w;
+  }
+
+  listSavedWorlds(): SavedWorld[] {
+    return (this.sql.prepare("SELECT * FROM live_worlds ORDER BY created_at").all() as Row[]).map((r) => ({
+      id: String(r.id),
+      spec: json<WorldSpec>(r.spec),
+      createdBy: r.created_by === null ? null : String(r.created_by),
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  deleteSavedWorld(id: string): void {
+    this.sql.prepare("DELETE FROM live_worlds WHERE id = ?").run(id);
+  }
+
+  // ---- admin overviews ----
+
+  listUsers(limit = 200): UserSummary[] {
+    const rows = this.sql
+      .prepare(
+        `SELECT u.*,
+           (SELECT COUNT(*) FROM creatures c WHERE c.owner_id = u.id) AS creatures,
+           (SELECT COUNT(*) FROM api_keys k WHERE k.user_id = u.id AND k.revoked_at IS NULL) AS api_keys,
+           (SELECT MAX(s.created_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen
+         FROM users u ORDER BY u.created_at DESC LIMIT ?`,
+      )
+      .all(limit) as Row[];
+    return rows.map((r) => ({
+      ...userFromRow(r),
+      creatures: Number(r.creatures),
+      apiKeys: Number(r.api_keys),
+      lastSeen: r.last_seen === null ? null : String(r.last_seen),
+    }));
+  }
+
+  counts(): { users: number; creatures: number; builtinCreatures: number; runs: Record<string, number>; matches: number } {
+    const one = (sql: string) => Number((this.sql.prepare(sql).get() as Row).n);
+    const runs: Record<string, number> = {};
+    for (const r of this.sql.prepare("SELECT status, COUNT(*) AS n FROM runs GROUP BY status").all() as Row[]) runs[String(r.status)] = Number(r.n);
+    return {
+      users: one("SELECT COUNT(*) AS n FROM users"),
+      creatures: one("SELECT COUNT(*) AS n FROM creatures"),
+      builtinCreatures: one("SELECT COUNT(*) AS n FROM creatures WHERE builtin = 1"),
+      runs,
+      matches: one("SELECT COUNT(*) AS n FROM matches"),
+    };
+  }
+
+  userNames(ids: string[]): Map<string, string> {
+    const q = this.sql.prepare("SELECT name FROM users WHERE id = ?");
+    const out = new Map<string, string>();
+    for (const id of new Set(ids)) {
+      const r = q.get(id) as Row | undefined;
+      if (r) out.set(id, String(r.name));
+    }
+    return out;
   }
 
   // ---- users, sessions, API keys ----

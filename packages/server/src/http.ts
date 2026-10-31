@@ -35,6 +35,8 @@ export const MAX_ACTIVE_RUNS_PER_USER = 5;
 
 const SDK_DIR = new URL("../../sdk/", import.meta.url);
 const VIEWER = new URL("../static/viewer.html", import.meta.url);
+const PRIVACY = new URL("../static/privacy.html", import.meta.url);
+const ADMIN = new URL("../static/admin.html", import.meta.url);
 const MAX_WAIT_MS = 10 * 60_000;
 
 const worldOverrides = z
@@ -89,7 +91,9 @@ const schemas = {
     tps: z.number().min(0.5).max(200).optional(),
     migration: z.boolean().optional(),
     recolonizeAfter: z.number().int().min(0).max(100_000).optional(),
+    species: z.array(z.object({ creature: z.string().min(8), population: z.number().int().min(0).max(100).optional() })).max(20).optional(),
   }),
+  worldPatch: z.object({ name: z.string().min(1).max(100).optional(), tps: z.number().min(0.5).max(200).optional() }),
   addSpecies: z.object({ creature: z.string().min(8), population: z.number().int().min(0).max(100).optional() }),
   control: z.object({ action: z.enum(["pause", "resume", "step"]).optional(), tps: z.number().min(0.5).max(200).optional() }),
   replay: z.object({
@@ -146,6 +150,13 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
   const finishRun = async (id: string, waitFor: boolean | undefined) =>
     waitFor ? s.runs.waitFor(id, MAX_WAIT_MS) : s.runs.get(id);
 
+  // Browsers asking for the home page get the viewer; agents and scripts get the JSON docs.
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.method === "GET" && req.url === "/" && (req.headers.accept ?? "").includes("text/html")) return reply.redirect("/view");
+  });
+
+  app.get("/privacy", async (_req, reply) => reply.type("text/html").send(readFileSync(PRIVACY, "utf8")));
+
   app.get("/", async () => ({
     name: "terrarium",
     engine: ENGINE_VERSION,
@@ -180,16 +191,21 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
       "POST /tournaments": "{entrants, background?, format: ffa|round-robin, seeds?, world?, ladder?, wait?}. Signed in; rated ladders (ladder set) are admin only. Admins default to '<ruleset>/<scoring>'.",
       "GET /runs/:id": "Status and summary of a match, evaluation or tournament. ?matches=1 adds per-match results.",
       "GET /runs": "?kind=match|evaluation|tournament",
+      "GET /privacy": "Privacy policy.",
       "GET /view": "Browser viewer for live worlds (?world=id) and replays (?match=id).",
       "GET /matches": "Recent finished matches.",
       "GET /matches/:id": "Full match result: stats, logs, timeline.",
       "GET /matches/:id/replay": "?from=&to=&every= Re-simulates deterministically and returns frames. verified=true when the hash matches.",
       "GET /ladders": "List ladders. GET /ladders/:ladder is the leaderboard.",
-      "POST /worlds": "{name?, world?, tps?, migration?, recolonizeAfter? (ticks, 0 = off, default 500)} Admin. Start a live shared world.",
+      "POST /worlds": "{name?, world?, tps?, migration?, recolonizeAfter? (ticks, 0 = off, default 500), species?: [{creature, population?}]} Admin. Start a live shared world. Worlds are saved and come back after restarts (from tick 0).",
       "GET /worlds": "List live worlds. GET /worlds/:id for one.",
       "POST /worlds/:id/species": "{creature, population?} Signed in, your own or builtin creatures. Add a species to a live world.",
       "POST /worlds/:id/control": "{action?: pause|resume|step, tps?} Admin.",
-      "DELETE /worlds/:id": "Admin. Stop a live world.",
+      "DELETE /worlds/:id": "Admin. Delete a live world (stops it and forgets its saved definition).",
+      "PATCH /worlds/:id": "{name?, tps?} Admin.",
+      "POST /worlds/:id/restart": "Admin. Start the world again from tick 0 with its saved settings and species.",
+      "DELETE /worlds/:id/species/:creature": "Admin. Remove a species from a live world.",
+      "GET /admin": "Backoffice (admins). Data: GET /admin/overview, /admin/users, /admin/runs.",
       "WS /worlds/:id/stream": "Messages: species | frame | stats | notice | focus | error (JSON). Send {type:'follow', id} to receive the full state of one organism as 'focus' messages (id null to stop). Frame entity = [id, kind(0 plant,1 animal,2 corpse), x, y, r, species, energy].",
     },
   }));
@@ -381,8 +397,47 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
   // ---- live worlds ----
 
   app.post("/worlds", async (req, reply) => {
+    const admin = requireAdmin(req);
+    return reply.status(201).send(s.live.create(parse(schemas.world, req.body), admin.id));
+  });
+  app.patch("/worlds/:id", async (req) => {
     requireAdmin(req);
-    return reply.status(201).send(s.live.create(parse(schemas.world, req.body)));
+    const { id } = req.params as { id: string };
+    const b = parse(schemas.worldPatch, req.body);
+    if (b.name) s.live.rename(id, b.name);
+    if (b.tps) s.live.setTps(id, b.tps);
+    return s.live.get(id);
+  });
+  app.post("/worlds/:id/restart", async (req) => {
+    requireAdmin(req);
+    const { id } = req.params as { id: string };
+    await s.live.restart(id);
+    return s.live.get(id);
+  });
+  app.delete("/worlds/:id/species/:creature", async (req, reply) => {
+    requireAdmin(req);
+    const { id, creature } = req.params as { id: string; creature: string };
+    s.live.removeSpecies(id, creature);
+    return reply.status(204).send();
+  });
+
+  // ---- backoffice ----
+
+  app.get("/admin", async (_req, reply) => reply.type("text/html").send(readFileSync(ADMIN, "utf8")));
+  app.get("/admin/overview", async (req) => {
+    requireAdmin(req);
+    return { ...s.db.counts(), pool: { workers: s.pool.size, busy: s.pool.busy, queued: s.pool.queued }, worlds: s.live.list().length, engine: ENGINE_VERSION };
+  });
+  app.get("/admin/users", async (req) => {
+    requireAdmin(req);
+    const admins = new Set(s.auth.opts.admins.map((e) => e.trim().toLowerCase()));
+    return s.db.listUsers().map((u) => ({ ...u, isAdmin: admins.has(u.email.toLowerCase()) }));
+  });
+  app.get("/admin/runs", async (req) => {
+    requireAdmin(req);
+    const runs = s.db.listRuns({ limit: 100 });
+    const names = s.db.userNames(runs.flatMap((r) => (r.createdBy ? [r.createdBy] : [])));
+    return runs.map((r) => ({ ...r, createdByName: r.createdBy ? (names.get(r.createdBy) ?? null) : null }));
   });
   app.get("/worlds", async () => s.live.list());
   app.get("/worlds/:id", async (req) => s.live.get((req.params as { id: string }).id));

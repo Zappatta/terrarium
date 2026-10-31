@@ -195,6 +195,19 @@ export class World {
       : this.config.maxPopulationPerSpecies;
   }
 
+  /** Take a species out of the world entirely: members vanish (no corpses) and its brain is disposed. */
+  removeSpecies(speciesId: string): void {
+    const sp = this.species.get(speciesId);
+    if (!sp) return;
+    for (const e of this.organisms()) if (e.c.species?.speciesId === speciesId) this.remove(e);
+    this.dying.splice(0, this.dying.length, ...this.dying.filter(([e]) => e.c.species?.speciesId !== speciesId));
+    for (const e of [...this.dyingSet]) if (e.c.species?.speciesId === speciesId) this.dyingSet.delete(e);
+    sp.controller.dispose?.();
+    this.species.delete(speciesId);
+    this.stats.delete(speciesId);
+    this.initialCounts.delete(speciesId);
+  }
+
   hasSpecies(speciesId: string): boolean {
     return this.species.has(speciesId);
   }

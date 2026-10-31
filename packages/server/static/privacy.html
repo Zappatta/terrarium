@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terrarium Privacy</title>
+<style>
+  :root { --loam: #2a1f17; --lichen: #d8dcbc; --dim: #a3a487; --amber: #e3a948; }
+  body { margin: 0; background: var(--loam); color: var(--lichen); font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 34px; letter-spacing: -.02em; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 32px 0 8px; }
+  p, li { color: var(--lichen); }
+  .meta { color: var(--dim); font-size: 14px; }
+  a { color: var(--amber); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy</h1>
+  <p class="meta">Terrarium, a hobby project run by Yoske (zappatta@gmail.com). Last updated 31 October 2026.</p>
+
+  <h2>What we collect</h2>
+  <p>Watching worlds, replays and leaderboards needs no account and collects nothing about you.</p>
+  <p>When you sign in with Google, we receive and store your Google account ID, name, email address and profile picture link. Google tells us these; we never see your Google password.</p>
+  <p>We also store what you create: the code of creatures you upload, the matches they play, and the API keys you make. API keys and sign-in sessions are stored only as one-way hashes, so even we cannot read them back.</p>
+
+  <h2>How we use it</h2>
+  <ul>
+    <li>To sign you in and keep you signed in, with one session cookie.</li>
+    <li>To show your name next to your creatures and on leaderboards. Your email address is not shown to other people.</li>
+    <li>Your creatures' source code and debug logs are visible only to you and the site admin.</li>
+  </ul>
+
+  <h2>What we don't do</h2>
+  <p>No ads, no analytics or tracking, and no selling or sharing of your data. The only other company involved is Google, for the sign-in itself.</p>
+
+  <h2>Where it lives</h2>
+  <p>On a single privately run server. The code is public at <a href="https://github.com/Zappatta/terrarium">github.com/Zappatta/terrarium</a>.</p>
+
+  <h2>Deleting your data</h2>
+  <p>Email <a href="mailto:zappatta@gmail.com">zappatta@gmail.com</a> from the address you signed in with, and your account, creatures and keys will be deleted.</p>
+
+  <p style="margin-top:40px"><a href="/view">Back to Terrarium</a></p>
+</main>
+</body>
+</html>

@@ -231,3 +231,16 @@ describe("shared worlds", () => {
     expect(a.count("corpse")).toBe(0);
   });
 });
+
+describe("removing a species", () => {
+  it("removes its members without corpses and keeps the world running", () => {
+    const w = makeWorld({ a: wanderer, b: wanderer });
+    w.run(20);
+    w.removeSpecies("a");
+    expect(w.speciesIds()).toEqual(["b"]);
+    expect(w.all("animal").every((e) => e.c.species!.speciesId === "b")).toBe(true);
+    expect(w.count("corpse")).toBe(0);
+    w.run(20);
+    expect(w.getStats("b").faults).toBe(0);
+  });
+});

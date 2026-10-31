@@ -27,7 +27,7 @@ export async function createServices(opts: ServerOptions): Promise<Services & { 
   if (opts.seedBuiltins ?? true) await registry.seedBuiltins(new URL("../../sdk/examples/", import.meta.url));
   const pool = new BatchPool(opts.workers);
   const runs = new RunService(db, registry, pool);
-  const live = new LiveManager(registry, opts.maxLiveWorlds);
+  const live = new LiveManager(registry, db, opts.maxLiveWorlds);
   const auth = new Auth(db, {
     admins: opts.admins ?? [],
     googleClientId: opts.googleClientId,

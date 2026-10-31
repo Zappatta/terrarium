@@ -67,6 +67,22 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+describe("pages", () => {
+  it("sends browsers from / to the viewer and agents to the JSON docs", async () => {
+    const browser = await app.inject({ method: "GET", url: "/", headers: { accept: "text/html,application/xhtml+xml" } });
+    expect(browser.statusCode).toBe(302);
+    expect(browser.headers.location).toBe("/view");
+    const agent = await app.inject({ method: "GET", url: "/" });
+    expect(agent.json().name).toBe("terrarium");
+  });
+
+  it("serves the privacy policy", async () => {
+    const r = await app.inject({ method: "GET", url: "/privacy" });
+    expect(r.statusCode).toBe(200);
+    expect(r.body).toContain("Deleting your data");
+  });
+});
+
 describe("creatures", () => {
   it("seeds the builtin species", async () => {
     const builtins = await get("/creatures?builtin=true");

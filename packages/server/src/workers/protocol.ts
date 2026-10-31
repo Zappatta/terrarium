@@ -58,6 +58,7 @@ export type FocusDetail =
 
 export type LiveCommand =
   | { type: "follow"; ids: number[] }
+  | { type: "removeSpecies"; slot: string }
   | { type: "addSpecies"; entrant: EntrantSpec; population: number }
   | { type: "immigrate"; entrant: EntrantSpec; migrant: Migrant }
   | { type: "control"; action: "pause" | "resume" | "step"; }

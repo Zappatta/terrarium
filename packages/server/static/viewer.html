@@ -173,7 +173,7 @@
   </div>
 
   <div class="error" id="error" role="alert"></div>
-  <div class="meta" id="engine"></div>
+  <div class="meta"><span id="engine"></span> · <a href="/admin" id="adminLink" style="color:inherit" hidden>Backoffice</a> · <a href="/privacy" style="color:inherit">Privacy</a> · <a href="https://github.com/Zappatta/terrarium" style="color:inherit">Source</a></div>
 </aside>
 
 <script>
@@ -1411,6 +1411,7 @@ async function signedIn(promise) {
 
 function renderAccount() {
   $("newWorldRow").hidden = !auth.user?.isAdmin;
+  $("adminLink").hidden = !auth.user?.isAdmin;
   const el = $("account");
   const cfg = auth.config;
   if (!cfg) { el.innerHTML = ""; return; }

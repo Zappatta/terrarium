@@ -167,6 +167,18 @@ function schedule(): void {
 port.on("message", async (cmd: LiveCommand) => {
   try {
     switch (cmd.type) {
+      case "removeSpecies": {
+        await loading.get(cmd.slot);
+        world.removeSpecies(cmd.slot);
+        const i = species.findIndex((s) => s.slot === cmd.slot);
+        if (i >= 0) {
+          const [gone] = species.splice(i, 1);
+          send({ type: "notice", tick: world.tick, message: `${gone!.name} was removed from this world.` });
+        }
+        extinctSince.delete(cmd.slot);
+        send({ type: "species", species });
+        break;
+      }
       case "follow":
         setFollowed(cmd.ids.slice(0, 64));
         sendFocus();
