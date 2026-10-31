@@ -1,0 +1,96 @@
+name: release
+
+# Every push to main is a release: test, pick the next semver, tag it, and publish the image.
+# Version bumps follow commit messages since the last tag:
+#   "feat: ..." -> minor, "fix!: ..." or "BREAKING CHANGE" -> major, anything else -> patch.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/zappatta/terrarium
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick version
+        id: version
+        run: |
+          git fetch --tags --force
+          existing=$(git tag --points-at HEAD --list 'v[0-9]*' | sort -V | tail -1)
+          if [ -n "$existing" ]; then
+            version="${existing#v}"
+            echo "HEAD is already tagged $existing"
+          else
+            last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)
+            if [ "$last" = v0.0.0 ]; then range=HEAD; else range="$last..HEAD"; fi
+            log=$(git log --format='%s%n%b' "$range")
+            IFS=. read -r major minor patch <<< "${last#v}"
+            if echo "$log" | grep -qE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE'; then
+              major=$((major + 1)); minor=0; patch=0
+            elif echo "$log" | grep -qE '^feat(\(.+\))?:'; then
+              minor=$((minor + 1)); patch=0
+            else
+              patch=$((patch + 1))
+            fi
+            version="$major.$minor.$patch"
+            git tag "v$version"
+            git push origin "v$version"
+            echo "Tagged v$version (previous $last)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ steps.version.outputs.version }}
+            type=sha
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

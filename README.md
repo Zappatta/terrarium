@@ -55,6 +55,18 @@ Tick order: `pre` → perceive + decide (all species see the same state) → act
 - `TERRARIUM_DEV_LOGIN=1` allows signing in as any name without Google, from 127.0.0.1 only. `pnpm demo` turns it on and makes `admin@dev.local` an admin: sign in as "admin".
 - Behind HTTPS, set `TERRARIUM_SECURE_COOKIES=1` (or forward `X-Forwarded-Proto: https`).
 
+## Releases and deployment
+
+Every push to `main` runs the tests, tags the next version and publishes `ghcr.io/zappatta/terrarium` with tags `X.Y.Z`, `X.Y`, `X` (from 1.0 on), `sha-...` and `latest`. Commit messages pick the bump: `feat: ...` is minor, `fix!: ...` or `BREAKING CHANGE` is major, anything else is a patch.
+
+```sh
+docker run -d --name terrarium -p 127.0.0.1:7341:7341 -v terrarium-data:/data \
+  -e GOOGLE_CLIENT_ID=... -e TERRARIUM_ADMINS=you@example.com -e TERRARIUM_SECURE_COOKIES=1 \
+  ghcr.io/zappatta/terrarium:latest
+```
+
+The database lives in the `/data` volume. Put the container behind an HTTPS reverse proxy.
+
 ## Commands
 
 ```sh
