@@ -3,7 +3,7 @@ import { World, migration } from "@terrarium/engine";
 import { SandboxController } from "@terrarium/sandbox";
 import { encodeFrame } from "../frames.js";
 import { rulesetModules, type EntrantSpec } from "../match.js";
-import type { LiveCommand, LiveEvent, LiveSpeciesInfo, LiveWorkerData } from "./protocol.js";
+import type { FocusDetail, LiveCommand, LiveEvent, LiveSpeciesInfo, LiveWorkerData } from "./protocol.js";
 
 const port = parentPort!;
 const data = workerData as LiveWorkerData;
@@ -47,6 +47,63 @@ function edgePoint() {
   }
 }
 
+// ---- following individual organisms ----
+
+interface Followed {
+  events: Array<{ tick: number; event: unknown }>;
+  action: { tick: number; action: unknown; failure?: string } | null;
+  death: { tick: number; cause: string } | null;
+  reportedGone: boolean;
+}
+const followed = new Map<number, Followed>();
+
+world.observer = {
+  onEvent(id, event) {
+    followed.get(id)?.events.push({ tick: world.tick, event });
+  },
+  onAction(actor, action, failure) {
+    const f = followed.get(actor.id);
+    if (f) f.action = { tick: world.tick, action, failure };
+  },
+  onDeath(e, cause) {
+    const f = followed.get(e.id);
+    if (f) f.death = { tick: world.tick, cause };
+  },
+};
+
+function setFollowed(ids: number[]): void {
+  for (const id of [...followed.keys()]) if (!ids.includes(id)) followed.delete(id);
+  for (const id of ids) {
+    if (!followed.has(id)) followed.set(id, { events: [], action: null, death: null, reportedGone: false });
+  }
+}
+
+function sendFocus(): void {
+  if (!followed.size) return;
+  const details: FocusDetail[] = [];
+  for (const [id, f] of followed) {
+    const events = f.events.splice(0);
+    const e = world.get(id);
+    if (e) {
+      details.push({
+        id,
+        alive: true,
+        kind: e.kind,
+        species: e.c.species?.speciesId ?? null,
+        pos: { ...e.pos },
+        radius: e.radius,
+        c: structuredClone(e.c) as Record<string, unknown>,
+        events,
+        action: f.action,
+      });
+    } else if (!f.reportedGone) {
+      f.reportedGone = true;
+      details.push({ id, alive: false, tick: f.death?.tick ?? world.tick, cause: f.death?.cause ?? "left this world", events });
+    }
+  }
+  if (details.length) send({ type: "focus", tick: world.tick, details });
+}
+
 // Live worlds run forever, so any population eventually hits zero by chance. Recolonising (as if
 // from outside the tank) keeps them watchable. Never used in matches, which stay closed systems.
 const extinctSince = new Map<string, number>();
@@ -76,6 +133,7 @@ function tick(): void {
   world.step();
   if (world.tick % 10 === 0) recolonize();
   send({ type: "frame", frame: encodeFrame(world) });
+  sendFocus();
   const out = world.takeEmigrants();
   if (out.length) {
     send({
@@ -109,6 +167,10 @@ function schedule(): void {
 port.on("message", async (cmd: LiveCommand) => {
   try {
     switch (cmd.type) {
+      case "follow":
+        setFollowed(cmd.ids.slice(0, 64));
+        sendFocus();
+        break;
       case "addSpecies":
         await ensureSpecies(cmd.entrant, cmd.population);
         break;

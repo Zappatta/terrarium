@@ -116,6 +116,13 @@ export interface Migrant {
   from: string;
 }
 
+/** Optional hooks for hosts that watch individual organisms (spectators). Never affects the simulation. */
+export interface WorldObserver {
+  onEvent?(id: EntityId, event: GameEvent): void;
+  onAction?(actor: Entity, action: Action | PlantAction, failure: string | undefined): void;
+  onDeath?(e: Entity, cause: DeathCause): void;
+}
+
 export interface DecideResult {
   output?: DecideOutput;
   error?: string;

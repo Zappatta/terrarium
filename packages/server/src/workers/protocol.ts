@@ -40,7 +40,24 @@ export interface LiveSpeciesInfo {
   diet: string;
 }
 
+/** Full state of one followed organism, sent every tick while someone follows it. */
+export type FocusDetail =
+  | {
+      id: number;
+      alive: true;
+      kind: string;
+      species: string | null;
+      pos: { x: number; y: number };
+      radius: number;
+      /** Every component, as plain JSON. Modules may add ones the viewer does not know. */
+      c: Record<string, unknown>;
+      events: Array<{ tick: number; event: unknown }>;
+      action: { tick: number; action: unknown; failure?: string } | null;
+    }
+  | { id: number; alive: false; tick: number; cause: string; events: Array<{ tick: number; event: unknown }> };
+
 export type LiveCommand =
+  | { type: "follow"; ids: number[] }
   | { type: "addSpecies"; entrant: EntrantSpec; population: number }
   | { type: "immigrate"; entrant: EntrantSpec; migrant: Migrant }
   | { type: "control"; action: "pause" | "resume" | "step"; }
@@ -55,4 +72,5 @@ export type LiveEvent =
   | { type: "emigrants"; migrants: Array<{ codeHash: string; migrant: Migrant }> }
   | { type: "speciesError"; codeHash: string; error: string }
   | { type: "notice"; tick: number; message: string }
+  | { type: "focus"; tick: number; details: FocusDetail[] }
   | { type: "fatal"; error: string };

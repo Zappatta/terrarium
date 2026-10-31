@@ -6,14 +6,15 @@ import type { Frame } from "./frames.js";
 import type { WorldOverrides } from "./match.js";
 import type { Registry } from "./registry.js";
 import { spawnWorker } from "./workers/spawn.js";
-import type { LiveCommand, LiveEvent, LiveSpeciesInfo, LiveWorkerData } from "./workers/protocol.js";
+import type { FocusDetail, LiveCommand, LiveEvent, LiveSpeciesInfo, LiveWorkerData } from "./workers/protocol.js";
 
 export type LiveMessage =
   | { type: "species"; species: LiveSpeciesInfo[] }
   | { type: "frame"; frame: Frame }
   | { type: "stats"; tick: number; stats: SpeciesStats[]; plants: number; tps: number; paused: boolean }
   | { type: "error"; error: string }
-  | { type: "notice"; tick: number; message: string };
+  | { type: "notice"; tick: number; message: string }
+  | { type: "focus"; tick: number; details: FocusDetail[] };
 
 export interface CreateLiveWorld {
   name?: string;
@@ -23,7 +24,16 @@ export interface CreateLiveWorld {
   recolonizeAfter?: number;
 }
 
-type Subscriber = (msg: LiveMessage) => void;
+interface Subscriber {
+  send(msg: LiveMessage): void;
+  follow: number | null;
+}
+
+export interface Subscription {
+  unsubscribe(): void;
+  /** Follow one organism (or stop with null). Its full state then arrives as "focus" messages. */
+  follow(id: number | null): void;
+}
 
 class LiveWorld {
   species: LiveSpeciesInfo[] = [];
@@ -42,7 +52,20 @@ class LiveWorld {
   }
 
   broadcast(msg: LiveMessage): void {
-    for (const s of this.subscribers) s(msg);
+    for (const s of this.subscribers) s.send(msg);
+  }
+
+  syncFollows(): void {
+    const ids = [...new Set([...this.subscribers].flatMap((s) => (s.follow === null ? [] : [s.follow])))];
+    this.send({ type: "follow", ids });
+  }
+
+  routeFocus(msg: { type: "focus"; tick: number; details: FocusDetail[] }): void {
+    for (const s of this.subscribers) {
+      if (s.follow === null) continue;
+      const mine = msg.details.filter((d) => d.id === s.follow);
+      if (mine.length) s.send({ type: "focus", tick: msg.tick, details: mine });
+    }
   }
 
   info() {
@@ -119,13 +142,23 @@ export class LiveManager {
     this.world(id).send({ type: "setTps", tps });
   }
 
-  subscribe(id: string, fn: Subscriber): () => void {
+  subscribe(id: string, fn: (msg: LiveMessage) => void): Subscription {
     const w = this.world(id);
     fn({ type: "species", species: w.species });
     if (w.lastStats) fn(w.lastStats);
     if (w.lastFrame) fn({ type: "frame", frame: w.lastFrame });
-    w.subscribers.add(fn);
-    return () => w.subscribers.delete(fn);
+    const sub: Subscriber = { send: fn, follow: null };
+    w.subscribers.add(sub);
+    return {
+      unsubscribe: () => {
+        w.subscribers.delete(sub);
+        if (sub.follow !== null) w.syncFollows();
+      },
+      follow: (target) => {
+        sub.follow = target;
+        w.syncFollows();
+      },
+    };
   }
 
   async stop(id: string): Promise<void> {
@@ -176,6 +209,8 @@ export class LiveManager {
           dest.send({ type: "immigrate", entrant: this.registry.entrant(creature, slotFor(codeHash), false), migrant });
         }
         return;
+      case "focus":
+        return w.routeFocus(m);
       case "notice":
         w.notices.push({ tick: m.tick, message: m.message });
         if (w.notices.length > 50) w.notices.shift();

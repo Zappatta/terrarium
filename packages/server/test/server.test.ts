@@ -39,6 +39,8 @@ export default defineSpecies({
 let dir: string;
 let services: Awaited<ReturnType<typeof createServices>>;
 let app: FastifyInstance;
+let address: string | undefined;
+const listen = async () => (address ??= await app.listen({ port: 0, host: "127.0.0.1" }));
 
 const post = async (url: string, payload: unknown) => {
   const r = await app.inject({ method: "POST", url, payload: payload as object });
@@ -140,8 +142,7 @@ describe("live worlds", () => {
     const { body: world } = await post("/worlds", { name: "stream-test", tps: 50, world: { width: 300, height: 300 } });
     await post(`/worlds/${world.id}/species`, { creature: hash, population: 4 });
 
-    const address = await app.listen({ port: 0, host: "127.0.0.1" });
-    const ws = new WebSocket(`${address.replace("http", "ws")}/worlds/${world.id}/stream`);
+    const ws = new WebSocket(`${(await listen()).replace("http", "ws")}/worlds/${world.id}/stream`);
     const seen = new Set<string>();
     let livePop = 0;
     await new Promise<void>((resolve, reject) => {
@@ -165,6 +166,36 @@ describe("live worlds", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect((await get(`/worlds/${world.id}`)).tick).toBe(t1);
     expect((await app.inject({ method: "DELETE", url: `/worlds/${world.id}` })).statusCode).toBe(204);
+  });
+
+  it("streams the full state of a followed organism", async () => {
+    const hash = await submit(forager("Followed"));
+    const { body: world } = await post("/worlds", { name: "follow-test", tps: 50, world: { width: 300, height: 300 } });
+    await post(`/worlds/${world.id}/species`, { creature: hash, population: 3 });
+    const ws = new WebSocket(`${(await listen()).replace("http", "ws")}/worlds/${world.id}/stream`);
+    const focus = await new Promise<any>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("no focus message")), 15_000);
+      let asked = false;
+      ws.on("message", (raw) => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === "frame" && !asked) {
+          const animal = msg.frame.e.find((e: number[]) => e[1] === 1);
+          if (animal) {
+            asked = true;
+            ws.send(JSON.stringify({ type: "follow", id: animal[0] }));
+          }
+        }
+        if (msg.type === "focus") {
+          clearTimeout(t);
+          resolve(msg.details[0]);
+        }
+      });
+    });
+    ws.close();
+    expect(focus).toMatchObject({ alive: true, kind: "animal" });
+    expect(focus.c.energy.max).toBeGreaterThan(0);
+    expect(focus.c.species.traits).toBeDefined();
+    await app.inject({ method: "DELETE", url: `/worlds/${world.id}` });
   });
 
   it("recolonises a species that died out", async () => {

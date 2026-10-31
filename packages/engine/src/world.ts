@@ -26,6 +26,7 @@ import {
   type SpeciesStats,
   type System,
   type TraitDef,
+  type WorldObserver,
 } from "./types.js";
 import { dist } from "./vec.js";
 
@@ -93,6 +94,7 @@ export class World {
   /** Organisms that left via migration this tick; the host drains it with takeEmigrants(). */
   private readonly outbox: Migrant[] = [];
   readonly ruleIds: string[];
+  observer: WorldObserver | undefined;
 
   constructor(modules: RuleModule[], config: Partial<WorldConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config, params: { ...config.params } };
@@ -376,6 +378,7 @@ export class World {
   }
 
   emit(id: EntityId, event: GameEvent): void {
+    this.observer?.onEvent?.(id, event);
     let q = this.events.get(id);
     if (!q) this.events.set(id, (q = []));
     if (q.length < 32) q.push(event);
@@ -483,6 +486,7 @@ export class World {
       if (!actor.alive || this.isDying(actor)) continue;
       const handler = this.actionHandlers.get(action.type);
       const failure = handler ? handler.handle(this, actor, action) : `unknown action "${action.type}"`;
+      this.observer?.onAction?.(actor, action, failure || undefined);
       if (failure) this.emit(actor.id, { type: "actionFailed", action: String(action.type).slice(0, 32), reason: failure });
     }
   }
@@ -522,6 +526,7 @@ export class World {
       this.dyingSet.delete(e);
       if (!e.alive) continue;
       for (const m of this.modules) m.onDeath?.(this, e, cause);
+      this.observer?.onDeath?.(e, cause);
       const speciesId = e.c.species?.speciesId;
       if (speciesId) {
         const stats = this.getStats(speciesId);

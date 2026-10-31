@@ -154,7 +154,7 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
       "POST /worlds/:id/species": "{creature, population?} Add a species to a live world.",
       "POST /worlds/:id/control": "{action?: pause|resume|step, tps?}",
       "DELETE /worlds/:id": "Stop a live world.",
-      "WS /worlds/:id/stream": "Messages: species | frame | stats | notice | error (JSON). Frame entity = [id, kind(0 plant,1 animal,2 corpse), x, y, r, species, energy].",
+      "WS /worlds/:id/stream": "Messages: species | frame | stats | notice | focus | error (JSON). Send {type:'follow', id} to receive the full state of one organism as 'focus' messages (id null to stop). Frame entity = [id, kind(0 plant,1 animal,2 corpse), x, y, r, species, energy].",
     },
   }));
 
@@ -307,9 +307,9 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
 
   app.get("/worlds/:id/stream", { websocket: true }, (socket, req) => {
     const { id } = req.params as { id: string };
-    let unsubscribe: (() => void) | undefined;
+    let sub: ReturnType<LiveManager["subscribe"]> | undefined;
     try {
-      unsubscribe = s.live.subscribe(id, (msg) => {
+      sub = s.live.subscribe(id, (msg) => {
         // Slow spectators drop frames rather than buffering without bound.
         if (msg.type === "frame" && socket.bufferedAmount > 1_000_000) return;
         socket.send(JSON.stringify(msg));
@@ -319,7 +319,15 @@ export async function createApp(s: Services): Promise<FastifyInstance> {
       socket.close();
       return;
     }
-    socket.on("close", () => unsubscribe?.());
+    socket.on("message", (raw: Buffer) => {
+      try {
+        const msg = JSON.parse(String(raw)) as { type?: string; id?: unknown };
+        if (msg.type === "follow") sub?.follow(typeof msg.id === "number" && Number.isInteger(msg.id) ? msg.id : null);
+      } catch {
+        // Ignore malformed spectator messages.
+      }
+    });
+    socket.on("close", () => sub?.unsubscribe());
   });
 
   return app;
